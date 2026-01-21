@@ -8,6 +8,15 @@ use thiserror::Error;
 
 use crate::ffi;
 
+/// One VDF proof job input for the batch (“Trick 2”) API.
+#[derive(Debug, Clone, Copy)]
+pub struct ChiavdfBatchJob<'a> {
+    /// Serialized expected output form (`y_ref`), typically 100 bytes.
+    pub y_ref_s: &'a [u8],
+    /// Target number of iterations for this proof.
+    pub num_iterations: u64,
+}
+
 struct ProgressCtx {
     cb: *mut (dyn FnMut(u64) + Send),
 }
@@ -145,6 +154,50 @@ pub fn last_streaming_stats() -> Option<StreamingStats> {
         checkpoint_calls,
         bucket_updates,
     })
+}
+
+struct BatchResultGuard {
+    ptr: *mut ffi::ChiavdfByteArray,
+    count: usize,
+}
+
+impl Drop for BatchResultGuard {
+    fn drop(&mut self) {
+        // SAFETY: `ptr` was allocated by the native batch API and must be freed
+        // exactly once with `chiavdf_free_byte_array_batch`.
+        unsafe { ffi::chiavdf_free_byte_array_batch(self.ptr, self.count) };
+    }
+}
+
+fn take_result_batch(
+    ptr: *mut ffi::ChiavdfByteArray,
+    count: usize,
+) -> Result<Vec<Vec<u8>>, ChiavdfFastError> {
+    if ptr.is_null() || count == 0 {
+        return Err(ChiavdfFastError::NativeFailure);
+    }
+
+    let guard = BatchResultGuard { ptr, count };
+
+    // SAFETY: `ptr` points to an array of `count` `ChiavdfByteArray` entries.
+    let arrays = unsafe { std::slice::from_raw_parts(guard.ptr, guard.count) };
+
+    let mut out = Vec::with_capacity(count);
+    for array in arrays {
+        if array.data.is_null() || array.length == 0 {
+            return Err(ChiavdfFastError::NativeFailure);
+        }
+        // SAFETY: The native library returns a heap-allocated buffer of `length`
+        // bytes. We copy it out before freeing the batch.
+        let bytes = unsafe { std::slice::from_raw_parts(array.data, array.length).to_vec() };
+        if bytes.len() < 2 || bytes.len() % 2 != 0 {
+            return Err(ChiavdfFastError::UnexpectedLength(bytes.len()));
+        }
+        out.push(bytes);
+    }
+
+    drop(guard);
+    Ok(out)
 }
 
 /// Compute a compact (witness_type=0) Wesolowski proof using the fast chiavdf engine.
@@ -468,4 +521,117 @@ where
             ),
         )
     }
+}
+
+/// Compute multiple compact (witness_type=0) Wesolowski proofs in one shared
+/// squaring run (Trick 2), using:
+/// - streaming bucket accumulation (Trick 1)
+/// - precomputed `GetBlock()` mapping (GetBlock opt)
+///
+/// Returns one `y || proof` buffer per job (same format as single-job APIs).
+pub fn prove_one_weso_fast_streaming_getblock_opt_batch(
+    challenge_hash: &[u8],
+    x_s: &[u8],
+    discriminant_size_bits: usize,
+    jobs: &[ChiavdfBatchJob<'_>],
+) -> Result<Vec<Vec<u8>>, ChiavdfFastError> {
+    prove_one_weso_fast_streaming_getblock_opt_batch_with_progress(
+        challenge_hash,
+        x_s,
+        discriminant_size_bits,
+        jobs,
+        0,
+        |_| {},
+    )
+}
+
+/// Same as [`prove_one_weso_fast_streaming_getblock_opt_batch`], but invokes
+/// `progress` every `progress_interval` squaring iterations completed.
+pub fn prove_one_weso_fast_streaming_getblock_opt_batch_with_progress<F>(
+    challenge_hash: &[u8],
+    x_s: &[u8],
+    discriminant_size_bits: usize,
+    jobs: &[ChiavdfBatchJob<'_>],
+    progress_interval: u64,
+    mut progress: F,
+) -> Result<Vec<Vec<u8>>, ChiavdfFastError>
+where
+    F: FnMut(u64) + Send + 'static,
+{
+    if challenge_hash.is_empty() {
+        return Err(ChiavdfFastError::InvalidInput(
+            "challenge_hash must not be empty",
+        ));
+    }
+    if x_s.is_empty() {
+        return Err(ChiavdfFastError::InvalidInput("x_s must not be empty"));
+    }
+    if discriminant_size_bits == 0 {
+        return Err(ChiavdfFastError::InvalidInput(
+            "discriminant_size_bits must be > 0",
+        ));
+    }
+    if jobs.is_empty() {
+        return Err(ChiavdfFastError::InvalidInput("jobs must not be empty"));
+    }
+    for job in jobs {
+        if job.y_ref_s.is_empty() {
+            return Err(ChiavdfFastError::InvalidInput(
+                "job y_ref_s must not be empty",
+            ));
+        }
+        if job.num_iterations == 0 {
+            return Err(ChiavdfFastError::InvalidInput(
+                "job num_iterations must be > 0",
+            ));
+        }
+    }
+
+    let ffi_jobs: Vec<ffi::ChiavdfBatchJob> = jobs
+        .iter()
+        .map(|job| ffi::ChiavdfBatchJob {
+            y_ref_s: job.y_ref_s.as_ptr(),
+            y_ref_s_size: job.y_ref_s.len(),
+            num_iterations: job.num_iterations,
+        })
+        .collect();
+
+    let ptr = if progress_interval == 0 {
+        // SAFETY: Pointers + lengths are provided for all slices and the
+        // returned batch pointer is freed by `take_result_batch`.
+        unsafe {
+            ffi::chiavdf_prove_one_weso_fast_streaming_getblock_opt_batch(
+                challenge_hash.as_ptr(),
+                challenge_hash.len(),
+                x_s.as_ptr(),
+                x_s.len(),
+                discriminant_size_bits,
+                ffi_jobs.as_ptr(),
+                ffi_jobs.len(),
+            )
+        }
+    } else {
+        let cb: &mut (dyn FnMut(u64) + Send) = &mut progress;
+        let mut ctx = ProgressCtx {
+            cb: cb as *mut (dyn FnMut(u64) + Send),
+        };
+        // SAFETY: Same as above, with progress callback + context valid for the
+        // duration of the call.
+        unsafe {
+            ffi::chiavdf_prove_one_weso_fast_streaming_getblock_opt_batch_with_progress(
+                challenge_hash.as_ptr(),
+                challenge_hash.len(),
+                x_s.as_ptr(),
+                x_s.len(),
+                discriminant_size_bits,
+                ffi_jobs.as_ptr(),
+                ffi_jobs.len(),
+                progress_interval,
+                Some(progress_trampoline),
+                std::ptr::addr_of_mut!(ctx).cast::<c_void>(),
+            )
+        }
+    };
+
+    take_result_batch(ptr, ffi_jobs.len())
 }

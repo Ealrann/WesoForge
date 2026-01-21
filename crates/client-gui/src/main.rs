@@ -39,6 +39,15 @@ impl Default for GuiState {
 #[derive(Debug, Clone, Deserialize)]
 struct StartOptions {
     parallel: Option<u32>,
+    mode: Option<WorkMode>,
+    max_proofs_per_group: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WorkMode {
+    Proof,
+    Group,
 }
 
 #[cfg(feature = "prod-backend")]
@@ -54,6 +63,12 @@ fn default_backend_url() -> Url {
         }
     }
     Url::parse(DEFAULT_BACKEND_URL).expect("DEFAULT_BACKEND_URL must be a valid URL")
+}
+
+fn default_use_groups() -> bool {
+    std::env::var("BBR_MODE")
+        .ok()
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("group"))
 }
 
 const GUI_PROGRESS_STEPS: u64 = 200;
@@ -99,9 +114,24 @@ async fn start_client(
     }
     let parallel = parallel as usize;
 
+    let mode = opts.mode.unwrap_or_else(|| {
+        if default_use_groups() {
+            WorkMode::Group
+        } else {
+            WorkMode::Proof
+        }
+    });
+    let use_groups = matches!(mode, WorkMode::Group);
+    let group_max_proofs_per_group = opts
+        .max_proofs_per_group
+        .unwrap_or(EngineConfig::DEFAULT_GROUP_MAX_PROOFS_PER_GROUP)
+        .clamp(1, 200);
+
     let engine = start_engine(EngineConfig {
         backend_url: default_backend_url(),
         parallel,
+        use_groups,
+        group_max_proofs_per_group,
         mem_budget_bytes: 128 * 1024 * 1024,
         submitter,
         idle_sleep: Duration::ZERO,

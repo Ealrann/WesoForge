@@ -11,6 +11,13 @@ pub(crate) struct ChiavdfByteArray {
     pub(crate) length: usize,
 }
 
+#[repr(C)]
+pub(crate) struct ChiavdfBatchJob {
+    pub(crate) y_ref_s: *const u8,
+    pub(crate) y_ref_s_size: usize,
+    pub(crate) num_iterations: u64,
+}
+
 pub(crate) type ProgressCallback = unsafe extern "C" fn(iters_done: u64, user_data: *mut c_void);
 
 unsafe extern "C" {
@@ -99,6 +106,31 @@ unsafe extern "C" {
         progress_cb: Option<ProgressCallback>,
         progress_user_data: *mut c_void,
     ) -> ChiavdfByteArray;
+
+    pub(crate) fn chiavdf_prove_one_weso_fast_streaming_getblock_opt_batch(
+        challenge_hash: *const u8,
+        challenge_size: usize,
+        x_s: *const u8,
+        x_s_size: usize,
+        discriminant_size_bits: usize,
+        jobs: *const ChiavdfBatchJob,
+        job_count: usize,
+    ) -> *mut ChiavdfByteArray;
+
+    pub(crate) fn chiavdf_prove_one_weso_fast_streaming_getblock_opt_batch_with_progress(
+        challenge_hash: *const u8,
+        challenge_size: usize,
+        x_s: *const u8,
+        x_s_size: usize,
+        discriminant_size_bits: usize,
+        jobs: *const ChiavdfBatchJob,
+        job_count: usize,
+        progress_interval: u64,
+        progress_cb: Option<ProgressCallback>,
+        progress_user_data: *mut c_void,
+    ) -> *mut ChiavdfByteArray;
+
+    pub(crate) fn chiavdf_free_byte_array_batch(arrays: *mut ChiavdfByteArray, count: usize);
 
     pub(crate) fn chiavdf_free_byte_array(array: ChiavdfByteArray);
 }

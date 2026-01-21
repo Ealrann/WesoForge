@@ -5,7 +5,7 @@
   "build": {
     "beforeDevCommand": "pnpm -C ../ui dev",
     "beforeBuildCommand": "pnpm -C ../ui build",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://127.0.0.1:5173",
     "frontendDist": "../../ui/dist"
   },
   "app": {

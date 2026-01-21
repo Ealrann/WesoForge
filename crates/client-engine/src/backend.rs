@@ -116,6 +116,37 @@ pub(crate) struct BackendWorkBatch {
     pub(crate) jobs: Vec<BackendJobDto>,
 }
 
+#[derive(Debug, Serialize)]
+struct LeaseGroupsRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_proofs_per_group: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LeaseGroupsResponse {
+    lease_id: String,
+    lease_expires_at: i64,
+    groups: Vec<LeasedGroupDto>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LeasedGroupDto {
+    group_id: u64,
+    jobs: Vec<BackendJobDto>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BackendWorkGroup {
+    pub(crate) group_id: u64,
+    pub(crate) lease_id: String,
+    pub(crate) lease_expires_at: i64,
+    pub(crate) jobs: Vec<BackendJobDto>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct BackendJobDto {
     pub(crate) job_id: u64,
@@ -158,6 +189,50 @@ pub(crate) async fn fetch_work(
         return Err(error_from_response(res).await);
     }
     Ok(res.json().await?)
+}
+
+pub(crate) async fn fetch_group_work(
+    http: &reqwest::Client,
+    backend: &Url,
+    count: u32,
+    max_proofs_per_group: u32,
+) -> anyhow::Result<Vec<BackendWorkGroup>> {
+    let url = backend.join("api/jobs/lease_groups")?;
+    let count = count.clamp(1, 32);
+    let max_proofs_per_group = max_proofs_per_group.clamp(1, 200);
+    let res = http
+        .post(url)
+        .json(&LeaseGroupsRequest {
+            group_id: None,
+            count: Some(count),
+            max_proofs_per_group: Some(max_proofs_per_group),
+        })
+        .send()
+        .await?;
+
+    if !res.status().is_success() {
+        return Err(error_from_response(res).await);
+    }
+
+    let batch: LeaseGroupsResponse = res.json().await?;
+    if batch.groups.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::with_capacity(batch.groups.len());
+    for group in batch.groups {
+        if group.jobs.is_empty() {
+            continue;
+        }
+        out.push(BackendWorkGroup {
+            group_id: group.group_id,
+            lease_id: batch.lease_id.clone(),
+            lease_expires_at: batch.lease_expires_at,
+            jobs: group.jobs,
+        });
+    }
+
+    Ok(out)
 }
 
 pub(crate) async fn submit_job(

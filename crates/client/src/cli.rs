@@ -1,5 +1,7 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use reqwest::Url;
+
+use bbr_client_engine::EngineConfig;
 
 #[cfg(feature = "prod-backend")]
 const DEFAULT_BACKEND_URL: &str = "https://weso.forgeros.fr/";
@@ -58,6 +60,14 @@ fn parse_mem_budget_bytes(input: &str) -> Result<u64, String> {
         .ok_or_else(|| format!("mem budget too large: {input:?}"))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum WorkMode {
+    /// Fetch and compute individual proofs (default).
+    Proof,
+    /// Fetch and compute 4-proof “groups” (shared squaring).
+    Group,
+}
+
 #[derive(Debug, Clone, Parser)]
 #[command(name = "wesoforge", version, about = "WesoForge compact proof worker")]
 pub struct Cli {
@@ -73,6 +83,18 @@ pub struct Cli {
         value_parser = clap::value_parser!(u16).range(1..=512)
     )]
     pub parallel: u16,
+
+    /// Work mode: individual proofs or grouped proofs.
+    #[arg(long, env = "BBR_MODE", value_enum, default_value_t = WorkMode::Proof)]
+    pub mode: WorkMode,
+
+    /// Max number of proofs per group request (only used with `--mode group`).
+    #[arg(
+        long = "group-max-proofs",
+        env = "BBR_GROUP_MAX_PROOFS_PER_GROUP",
+        default_value_t = EngineConfig::DEFAULT_GROUP_MAX_PROOFS_PER_GROUP
+    )]
+    pub group_max_proofs_per_group: u32,
 
     #[arg(long, env = "BBR_NO_TUI", default_value_t = false)]
     pub no_tui: bool,

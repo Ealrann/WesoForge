@@ -5,11 +5,16 @@
   import PopupFrame from './components/PopupFrame.svelte';
   import pkg from '../package.json';
 
-	  type SubmitterConfig = { reward_address?: string | null; name?: string | null };
-	  type StartOptions = { parallel?: number | null };
-
-	  const appVersion = pkg.version;
-	  const PARALLEL_STORAGE_KEY = 'bbr_parallel_workers';
+  type SubmitterConfig = { reward_address?: string | null; name?: string | null };
+  type WorkMode = 'proof' | 'group';
+  type StartOptions = {
+    parallel?: number | null;
+    mode?: WorkMode | null;
+    max_proofs_per_group?: number | null;
+  };
+ 
+  const appVersion = pkg.version;
+  const PARALLEL_STORAGE_KEY = 'bbr_parallel_workers';
 
   type WorkerStage = 'Idle' | 'Computing' | 'Submitting';
 
@@ -72,6 +77,8 @@
   let logsOpen = $state(false);
 
   let parallel = $state<number>(4);
+  let mode = $state<WorkMode>('proof');
+  let maxProofsPerGroup = $state<number>(100);
   let running = $state(false);
   let stopRequested = $state(false);
   let runError = $state<string | null>(null);
@@ -428,16 +435,25 @@
     }
   }
 
-	  async function start() {
-	    runError = null;
-	    try {
-	      commitParallel();
-	      const opts: StartOptions = {
-	        parallel
-	      };
-	      await invoke<void>('start_client', { opts });
-	      running = true;
-	      stopRequested = false;
+  async function start() {
+    runError = null;
+    try {
+      commitParallel();
+      if (mode === 'group') {
+        if (!Number.isFinite(maxProofsPerGroup)) {
+          maxProofsPerGroup = 1;
+        } else {
+          maxProofsPerGroup = Math.min(200, Math.max(1, Math.floor(maxProofsPerGroup)));
+        }
+      }
+      const opts: StartOptions = {
+        parallel,
+        mode,
+        max_proofs_per_group: mode === 'group' ? maxProofsPerGroup : null
+      };
+      await invoke<void>('start_client', { opts });
+      running = true;
+      stopRequested = false;
       void refreshSnapshotSoon(10);
     } catch (e) {
       runError = String(e);
@@ -581,20 +597,45 @@
 	    <section class="rounded border border-border bg-surface p-4 lg:col-start-1 lg:col-span-1 lg:row-start-1 flex flex-col">
 		      <h2 class="text-sm font-semibold">Configuration</h2>
 
-		      <div class="mt-4 grid grid-cols-1 gap-3">
-		        <label class="flex items-center justify-between gap-4 text-sm">
-		          <span class="text-muted">Parallel workers</span>
-			          <input
-			            class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-			            type="number"
-			            min="1"
-			            max="512"
-			            step="1"
-			            bind:value={parallel}
-			            onchange={commitParallel}
-			          />
-			        </label>
-			      </div>
+ 		      <div class="mt-4 grid grid-cols-1 gap-3">
+ 		        <label class="flex items-center justify-between gap-4 text-sm">
+ 		          <span class="text-muted">Parallel workers</span>
+ 		          <input
+ 		            class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+ 		            type="number"
+ 		            min="1"
+		            max="512"
+ 		            step="1"
+ 		            bind:value={parallel}
+		            onchange={commitParallel}
+ 		          />
+ 		        </label>
+ 
+              <label class="flex items-center justify-between gap-4 text-sm">
+                <span class="text-muted">Mode</span>
+                <select
+                  class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+                  bind:value={mode}
+                >
+                  <option value="proof">Proof</option>
+                  <option value="group">Group</option>
+                </select>
+              </label>
+ 
+              {#if mode === 'group'}
+                <label class="flex items-center justify-between gap-4 text-sm">
+                  <span class="text-muted">Max proofs / group</span>
+                  <input
+                    class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+                    type="number"
+                    min="1"
+                    max="200"
+                    step="1"
+                    bind:value={maxProofsPerGroup}
+                  />
+                </label>
+              {/if}
+ 		      </div>
 
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
             <div class="grid gap-1">

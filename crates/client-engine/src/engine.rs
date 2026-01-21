@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,7 +12,9 @@ use crate::api::{
     EngineConfig, EngineEvent, EngineHandle, JobOutcome, JobSummary, StatusSnapshot,
     WorkerSnapshot, WorkerStage,
 };
-use crate::backend::{BackendJobDto, BackendWorkBatch, fetch_work};
+use crate::backend::{
+    BackendJobDto, BackendWorkBatch, BackendWorkGroup, fetch_group_work, fetch_work,
+};
 use crate::inflight::InflightStore;
 use crate::worker::{WorkerCommand, WorkerInternalEvent};
 
@@ -44,14 +46,50 @@ struct WorkJobItem {
 }
 
 #[derive(Debug)]
+enum WorkItem {
+    Job(WorkJobItem),
+    Group(BackendWorkGroup),
+}
+
+#[derive(Debug)]
+enum WorkProgress {
+    Single { total_iters: u64 },
+    Group { per_job_iters: Vec<u64> },
+}
+
+impl WorkProgress {
+    fn squaring_total_iters(&self) -> u64 {
+        match self {
+            WorkProgress::Single { total_iters } => *total_iters,
+            WorkProgress::Group { per_job_iters } => {
+                per_job_iters.iter().copied().max().unwrap_or(0)
+            }
+        }
+    }
+
+    fn effective_iters_done(&self, squaring_iters_done: u64) -> u64 {
+        match self {
+            WorkProgress::Single { .. } => squaring_iters_done,
+            WorkProgress::Group { per_job_iters } => per_job_iters
+                .iter()
+                .copied()
+                .map(|job_iters| job_iters.min(squaring_iters_done))
+                .sum(),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct WorkerRuntime {
     stage: WorkerStage,
     job: Option<JobSummary>,
-    iters_total: u64,
+    group_id: Option<u64>,
+    work: Option<WorkProgress>,
     last_speed_sample_at: Option<Instant>,
     prev_speed_interval: Option<(u64, Duration)>,
     speed_its_per_sec: u64,
-    last_reported_iters_done: u64,
+    last_reported_squaring_iters_done: u64,
+    last_reported_effective_iters_done: u64,
     last_emitted_iters_done: u64,
 }
 
@@ -60,11 +98,13 @@ impl WorkerRuntime {
         Self {
             stage: WorkerStage::Idle,
             job: None,
-            iters_total: 0,
+            group_id: None,
+            work: None,
             last_speed_sample_at: None,
             prev_speed_interval: None,
             speed_its_per_sec: 0,
-            last_reported_iters_done: 0,
+            last_reported_squaring_iters_done: 0,
+            last_reported_effective_iters_done: 0,
             last_emitted_iters_done: 0,
         }
     }
@@ -80,11 +120,28 @@ impl WorkerRuntime {
     fn start_job(&mut self, job: JobSummary) {
         self.stage = WorkerStage::Computing;
         self.job = Some(job.clone());
-        self.iters_total = job.number_of_iterations;
+        self.group_id = None;
+        self.work = Some(WorkProgress::Single {
+            total_iters: job.number_of_iterations,
+        });
         self.last_speed_sample_at = Some(Instant::now());
         self.prev_speed_interval = None;
         self.speed_its_per_sec = 0;
-        self.last_reported_iters_done = 0;
+        self.last_reported_squaring_iters_done = 0;
+        self.last_reported_effective_iters_done = 0;
+        self.last_emitted_iters_done = 0;
+    }
+
+    fn start_group(&mut self, group_id: u64, display_job: JobSummary, per_job_iters: Vec<u64>) {
+        self.stage = WorkerStage::Computing;
+        self.job = Some(display_job);
+        self.group_id = Some(group_id);
+        self.work = Some(WorkProgress::Group { per_job_iters });
+        self.last_speed_sample_at = Some(Instant::now());
+        self.prev_speed_interval = None;
+        self.speed_its_per_sec = 0;
+        self.last_reported_squaring_iters_done = 0;
+        self.last_reported_effective_iters_done = 0;
         self.last_emitted_iters_done = 0;
     }
 
@@ -95,24 +152,33 @@ impl WorkerRuntime {
     fn finish_job(&mut self) {
         self.stage = WorkerStage::Idle;
         self.job = None;
-        self.iters_total = 0;
+        self.group_id = None;
+        self.work = None;
         self.last_speed_sample_at = None;
         self.prev_speed_interval = None;
         self.speed_its_per_sec = 0;
-        self.last_reported_iters_done = 0;
+        self.last_reported_squaring_iters_done = 0;
+        self.last_reported_effective_iters_done = 0;
         self.last_emitted_iters_done = 0;
     }
 
     fn apply_progress(&mut self, iters_done: u64) -> Option<u64> {
-        let total_iters = self.iters_total;
+        let Some(work) = &self.work else {
+            return None;
+        };
+        let total_iters = work.squaring_total_iters();
         if total_iters == 0 {
             return None;
         }
 
         let now = Instant::now();
         let iters_done = iters_done.min(total_iters);
-        let delta = iters_done.saturating_sub(self.last_reported_iters_done);
-        if delta == 0 {
+        let effective_done = work.effective_iters_done(iters_done);
+        let delta_effective =
+            effective_done.saturating_sub(self.last_reported_effective_iters_done);
+        let delta_squaring =
+            iters_done.saturating_sub(self.last_reported_squaring_iters_done);
+        if delta_squaring == 0 && delta_effective == 0 {
             return None;
         }
 
@@ -120,20 +186,24 @@ impl WorkerRuntime {
             let dt = now.duration_since(last_at);
             let (total_iters, total_dt) = if let Some((prev_iters, prev_dt)) = self.prev_speed_interval
             {
-                (prev_iters.saturating_add(delta), prev_dt + dt)
+                (prev_iters.saturating_add(delta_effective), prev_dt + dt)
             } else {
-                (delta, dt)
+                (delta_effective, dt)
             };
 
             if total_dt.as_secs_f64() > 0.0 {
                 self.speed_its_per_sec = (total_iters as f64 / total_dt.as_secs_f64()).round() as u64;
             }
-            self.prev_speed_interval = Some((delta, dt));
+            self.prev_speed_interval = Some((delta_effective, dt));
         }
 
         self.last_speed_sample_at = Some(now);
-        self.last_reported_iters_done = iters_done;
-        Some(iters_done)
+        self.last_reported_squaring_iters_done = iters_done;
+        self.last_reported_effective_iters_done = effective_done;
+        if delta_squaring > 0 {
+            return Some(iters_done);
+        }
+        None
     }
 }
 
@@ -147,8 +217,8 @@ struct EngineRuntime {
     internal_rx: mpsc::UnboundedReceiver<WorkerInternalEvent>,
     worker_join: JoinSet<()>,
 
-    pending: VecDeque<WorkJobItem>,
-    fetch_task: Option<tokio::task::JoinHandle<anyhow::Result<Vec<WorkJobItem>>>>,
+    pending: VecDeque<WorkItem>,
+    fetch_task: Option<tokio::task::JoinHandle<anyhow::Result<Vec<WorkItem>>>>,
     fetch_backoff: Option<Pin<Box<tokio::time::Sleep>>>,
     inflight: Option<InflightStore>,
 
@@ -172,7 +242,7 @@ impl EngineRuntime {
                     .get(idx)
                     .map(|a| a.load(std::sync::atomic::Ordering::Relaxed))
                     .unwrap_or(0),
-                iters_total: w.iters_total,
+                iters_total: w.work.as_ref().map(|p| p.squaring_total_iters()).unwrap_or(0),
                 iters_per_sec: w.speed_its_per_sec,
             })
             .collect();
@@ -215,17 +285,28 @@ impl EngineRuntime {
 
         let http = self.http.clone();
         let backend = self.cfg.backend_url.clone();
+        let use_groups = self.cfg.use_groups;
+        let group_count = self.cfg.parallel.max(1).min(32) as u32;
+        let max_proofs_per_group = self.cfg.group_max_proofs_per_group;
         let count = count;
         self.fetch_task = Some(tokio::spawn(async move {
+            if use_groups {
+                let groups =
+                    fetch_group_work(&http, &backend, group_count, max_proofs_per_group).await?;
+                return Ok(groups.into_iter().map(WorkItem::Group).collect());
+            }
+
             let count = count.min(u32::MAX as usize) as u32;
             let batch: BackendWorkBatch = fetch_work(&http, &backend, count).await?;
             let items = batch
                 .jobs
                 .into_iter()
-                .map(|job| WorkJobItem {
-                    lease_id: batch.lease_id.clone(),
-                    lease_expires_at: batch.lease_expires_at,
-                    job,
+                .map(|job| {
+                    WorkItem::Job(WorkJobItem {
+                        lease_id: batch.lease_id.clone(),
+                        lease_expires_at: batch.lease_expires_at,
+                        job,
+                    })
                 })
                 .collect();
             Ok(items)
@@ -243,20 +324,73 @@ impl EngineRuntime {
             if !self.workers[idx].is_idle() {
                 continue;
             }
-            let Some(item) = self.pending.pop_front() else {
-                break;
-            };
+            let Some(item) = self.pending.pop_front() else { break };
 
-            let job_summary = JobSummary {
-                job_id: item.job.job_id,
-                height: item.job.height,
-                field_vdf: item.job.field_vdf,
-                number_of_iterations: item.job.number_of_iterations,
-            };
+            let (job_summary, cmd, group_info): (
+                JobSummary,
+                WorkerCommand,
+                Option<(u64, Vec<u64>)>,
+            ) =
+                match item {
+                    WorkItem::Job(item) => {
+                        let job_summary = JobSummary {
+                            job_id: item.job.job_id,
+                            height: item.job.height,
+                            field_vdf: item.job.field_vdf,
+                            number_of_iterations: item.job.number_of_iterations,
+                        };
+
+                        let cmd = WorkerCommand::Job {
+                            worker_idx: idx,
+                            backend_url: self.cfg.backend_url.clone(),
+                            lease_id: item.lease_id,
+                            lease_expires_at: item.lease_expires_at,
+                            job: item.job,
+                            progress_steps: self.cfg.progress_steps,
+                        };
+
+                        (job_summary, cmd, None)
+                    }
+                    WorkItem::Group(group) => {
+                        let group_id = group.group_id;
+                        let group_iters: Vec<u64> = group
+                            .jobs
+                            .iter()
+                            .map(|j| j.number_of_iterations)
+                            .collect();
+                        let total_iters = group_iters.iter().copied().max().unwrap_or(0);
+                        let Some(first) = group.jobs.first() else {
+                            continue;
+                        };
+
+                        let job_summary = JobSummary {
+                            job_id: first.job_id,
+                            height: first.height,
+                            field_vdf: first.field_vdf,
+                            number_of_iterations: total_iters,
+                        };
+
+                        let cmd = WorkerCommand::Group {
+                            worker_idx: idx,
+                            backend_url: self.cfg.backend_url.clone(),
+                            lease_id: group.lease_id,
+                            lease_expires_at: group.lease_expires_at,
+                            group_id: group.group_id,
+                            jobs: group.jobs,
+                            progress_steps: self.cfg.progress_steps,
+                        };
+
+                        (job_summary, cmd, Some((group_id, group_iters)))
+                    }
+                };
 
             {
                 let worker = &mut self.workers[idx];
-                worker.start_job(job_summary.clone());
+                if let Some((group_id, group_iters)) = group_info {
+                    worker.start_group(group_id, job_summary.clone(), group_iters);
+                } else {
+                    worker.start_job(job_summary.clone());
+                }
             }
             if let Some(a) = self.worker_progress.get(idx) {
                 a.store(0, std::sync::atomic::Ordering::Relaxed);
@@ -270,15 +404,6 @@ impl EngineRuntime {
                 stage: WorkerStage::Computing,
             });
             snapshot_dirty = true;
-
-            let cmd = WorkerCommand::Job {
-                worker_idx: idx,
-                backend_url: self.cfg.backend_url.clone(),
-                lease_id: item.lease_id,
-                lease_expires_at: item.lease_expires_at,
-                job: item.job,
-                progress_steps: self.cfg.progress_steps,
-            };
 
             self.worker_cmds
                 .get(idx)
@@ -297,7 +422,7 @@ impl EngineRuntime {
 
     async fn handle_fetch_result(
         &mut self,
-        res: Result<anyhow::Result<Vec<WorkJobItem>>, tokio::task::JoinError>,
+        res: Result<anyhow::Result<Vec<WorkItem>>, tokio::task::JoinError>,
     ) {
         self.fetch_task = None;
 
@@ -307,11 +432,24 @@ impl EngineRuntime {
                     if let Some(store) = &mut self.inflight {
                         let mut changed = false;
                         for item in &items {
-                            changed |= store.insert_job(
-                                item.lease_id.clone(),
-                                item.lease_expires_at,
-                                item.job.clone(),
-                            );
+                            match item {
+                                WorkItem::Job(item) => {
+                                    changed |= store.insert_job(
+                                        item.lease_id.clone(),
+                                        item.lease_expires_at,
+                                        item.job.clone(),
+                                    );
+                                }
+                                WorkItem::Group(group) => {
+                                    for job in &group.jobs {
+                                        changed |= store.insert_job(
+                                            group.lease_id.clone(),
+                                            group.lease_expires_at,
+                                            job.clone(),
+                                        );
+                                    }
+                                }
+                            }
                         }
                         if changed {
                             if let Err(err) = store.persist().await {
@@ -321,7 +459,29 @@ impl EngineRuntime {
                             }
                         }
                     }
-                    self.pending.extend(items);
+
+                    if self.cfg.use_groups {
+                        let mut seen_groups: HashSet<u64> =
+                            self.workers.iter().filter_map(|w| w.group_id).collect();
+                        for item in &self.pending {
+                            if let WorkItem::Group(group) = item {
+                                seen_groups.insert(group.group_id);
+                            }
+                        }
+
+                        for item in items {
+                            match item {
+                                WorkItem::Group(group) => {
+                                    if seen_groups.insert(group.group_id) {
+                                        self.pending.push_back(WorkItem::Group(group));
+                                    }
+                                }
+                                other => self.pending.push_back(other),
+                            }
+                        }
+                    } else {
+                        self.pending.extend(items);
+                    }
                 }
                 if self.pending.is_empty() {
                     self.fetch_backoff = Some(Box::pin(tokio::time::sleep(self.cfg.idle_sleep)));
@@ -351,8 +511,7 @@ impl EngineRuntime {
                 self.emit(EngineEvent::WorkerStage { worker_idx, stage });
                 self.push_snapshot();
             }
-            WorkerInternalEvent::Finished { outcome } => {
-                let worker_idx = outcome.worker_idx;
+            WorkerInternalEvent::WorkFinished { worker_idx, outcomes } => {
                 if let Some(worker) = self.workers.get_mut(worker_idx) {
                     worker.finish_job();
                 }
@@ -360,14 +519,27 @@ impl EngineRuntime {
                     a.store(0, Ordering::Relaxed);
                 }
 
-                self.recent_jobs.push_back(outcome.clone());
-                while self.recent_jobs.len() > self.cfg.recent_jobs_max.max(1) {
-                    self.recent_jobs.pop_front();
+                let mut remove_inflight_job_ids = Vec::new();
+                for outcome in outcomes {
+                    self.recent_jobs.push_back(outcome.clone());
+                    while self.recent_jobs.len() > self.cfg.recent_jobs_max.max(1) {
+                        self.recent_jobs.pop_front();
+                    }
+                    if outcome.drop_inflight
+                        || (outcome.error.is_none() && outcome.submit_reason.is_some())
+                    {
+                        remove_inflight_job_ids.push(outcome.job.job_id);
+                    }
+                    self.emit(EngineEvent::JobFinished { outcome });
                 }
 
-                if outcome.drop_inflight || (outcome.error.is_none() && outcome.submit_reason.is_some()) {
+                if !remove_inflight_job_ids.is_empty() {
                     if let Some(store) = &mut self.inflight {
-                        if store.remove_job(outcome.job.job_id) {
+                        let mut changed = false;
+                        for job_id in remove_inflight_job_ids {
+                            changed |= store.remove_job(job_id);
+                        }
+                        if changed {
                             if let Err(err) = store.persist().await {
                                 self.emit(EngineEvent::Warning {
                                     message: format!("warning: failed to persist inflight leases: {err:#}"),
@@ -376,8 +548,6 @@ impl EngineRuntime {
                         }
                     }
                 }
-
-                self.emit(EngineEvent::JobFinished { outcome });
                 self.push_snapshot();
             }
             WorkerInternalEvent::Warning { message } => {
@@ -409,7 +579,11 @@ impl EngineRuntime {
                     continue;
                 }
                 worker.last_emitted_iters_done = iters_done;
-                (iters_done, worker.iters_total, worker.speed_its_per_sec)
+                (
+                    iters_done,
+                    worker.work.as_ref().map(|p| p.squaring_total_iters()).unwrap_or(0),
+                    worker.speed_its_per_sec,
+                )
             };
 
             self.emit(EngineEvent::WorkerProgress {
@@ -477,7 +651,7 @@ impl EngineRuntime {
                 res = async {
                     match self.fetch_task.as_mut() {
                         Some(task) => task.await,
-                        None => std::future::pending::<Result<anyhow::Result<Vec<WorkJobItem>>, tokio::task::JoinError>>().await,
+                        None => std::future::pending::<Result<anyhow::Result<Vec<WorkItem>>, tokio::task::JoinError>>().await,
                     }
                 } => {
                     self.handle_fetch_result(res).await;
@@ -565,6 +739,11 @@ async fn run_engine(
     if cfg.recent_jobs_max == 0 {
         cfg.recent_jobs_max = EngineConfig::DEFAULT_RECENT_JOBS_MAX;
     }
+    if cfg.group_max_proofs_per_group == 0 {
+        cfg.group_max_proofs_per_group = EngineConfig::DEFAULT_GROUP_MAX_PROOFS_PER_GROUP;
+    }
+
+    cfg.group_max_proofs_per_group = cfg.group_max_proofs_per_group.clamp(1, 200);
 
     bbr_client_chiavdf_fast::set_bucket_memory_budget_bytes(cfg.mem_budget_bytes);
 
@@ -667,11 +846,11 @@ async fn run_engine(
     let mut pending = VecDeque::new();
     if let Some(store) = inflight.as_ref() {
         for entry in store.entries() {
-            pending.push_back(WorkJobItem {
+            pending.push_back(WorkItem::Job(WorkJobItem {
                 lease_id: entry.lease_id.clone(),
                 lease_expires_at: entry.lease_expires_at,
                 job: entry.job.clone(),
-            });
+            }));
         }
         if !pending.is_empty() {
             let message = format!(
