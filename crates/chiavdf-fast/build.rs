@@ -13,8 +13,21 @@ fn main() {
 
     let chiavdf_dir = env::var("BBR_CHIAVDF_DIR")
         .map(PathBuf::from)
-        // default to sibling `../chiavdf` (this repo contains both bbr_client/ and chiavdf/)
-        .unwrap_or_else(|_| repo_root.parent().expect("repo_root has parent").join("chiavdf"));
+        // Default to `../bbr_chiavdf` (preferred when present), falling back to `../chiavdf`.
+        .unwrap_or_else(|_| {
+            let repo_parent = repo_root.parent().expect("repo_root has parent");
+            let bbr = repo_parent.join("bbr_chiavdf");
+            if bbr
+                .join("src")
+                .join("c_bindings")
+                .join("fast_wrapper.cpp")
+                .exists()
+            {
+                bbr
+            } else {
+                repo_parent.join("chiavdf")
+            }
+        });
     let chiavdf_src = chiavdf_dir.join("src");
 
     println!(
@@ -31,11 +44,17 @@ fn main() {
     );
     println!(
         "cargo:rerun-if-changed={}",
-        chiavdf_src.join("c_bindings").join("fast_wrapper.cpp").display()
+        chiavdf_src
+            .join("c_bindings")
+            .join("fast_wrapper.cpp")
+            .display()
     );
     println!(
         "cargo:rerun-if-changed={}",
-        chiavdf_src.join("c_bindings").join("fast_wrapper.h").display()
+        chiavdf_src
+            .join("c_bindings")
+            .join("fast_wrapper.h")
+            .display()
     );
 
     let status = Command::new("make")
@@ -43,6 +62,8 @@ fn main() {
         .arg(&chiavdf_src)
         .arg("-f")
         .arg("Makefile.vdf-client")
+        // Ensure we don't reuse objects built with different flags (e.g. LTO).
+        .arg("-B")
         .arg("fastlib")
         .arg("PIC=1")
         .arg("LTO=")
@@ -54,6 +75,10 @@ fn main() {
     }
 
     println!("cargo:rustc-link-search=native={}", chiavdf_src.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        chiavdf_src.join("libchiavdf_fastc.a").display()
+    );
     println!("cargo:rustc-link-lib=static=chiavdf_fastc");
 
     // chiavdf depends on GMP and pthread.

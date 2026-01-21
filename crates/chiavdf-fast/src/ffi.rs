@@ -35,5 +35,55 @@ unsafe extern "C" {
         progress_user_data: *mut c_void,
     ) -> ChiavdfByteArray;
 
+    pub(crate) fn chiavdf_prove_one_weso_fast_streaming(
+        challenge_hash: *const u8,
+        challenge_size: usize,
+        x_s: *const u8,
+        x_s_size: usize,
+        y_ref_s: *const u8,
+        y_ref_s_size: usize,
+        discriminant_size_bits: usize,
+        num_iterations: u64,
+    ) -> ChiavdfByteArray;
+
+    pub(crate) fn chiavdf_prove_one_weso_fast_streaming_with_progress(
+        challenge_hash: *const u8,
+        challenge_size: usize,
+        x_s: *const u8,
+        x_s_size: usize,
+        y_ref_s: *const u8,
+        y_ref_s_size: usize,
+        discriminant_size_bits: usize,
+        num_iterations: u64,
+        progress_interval: u64,
+        progress_cb: Option<ProgressCallback>,
+        progress_user_data: *mut c_void,
+    ) -> ChiavdfByteArray;
+
+    pub(crate) fn chiavdf_prove_one_weso_fast_streaming_getblock_opt(
+        challenge_hash: *const u8,
+        challenge_size: usize,
+        x_s: *const u8,
+        x_s_size: usize,
+        y_ref_s: *const u8,
+        y_ref_s_size: usize,
+        discriminant_size_bits: usize,
+        num_iterations: u64,
+    ) -> ChiavdfByteArray;
+
+    pub(crate) fn chiavdf_prove_one_weso_fast_streaming_getblock_opt_with_progress(
+        challenge_hash: *const u8,
+        challenge_size: usize,
+        x_s: *const u8,
+        x_s_size: usize,
+        y_ref_s: *const u8,
+        y_ref_s_size: usize,
+        discriminant_size_bits: usize,
+        num_iterations: u64,
+        progress_interval: u64,
+        progress_cb: Option<ProgressCallback>,
+        progress_user_data: *mut c_void,
+    ) -> ChiavdfByteArray;
+
     pub(crate) fn chiavdf_free_byte_array(array: ChiavdfByteArray);
 }

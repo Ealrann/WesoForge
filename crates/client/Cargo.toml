@@ -13,5 +13,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
+indicatif = { workspace = true }
+crossterm = { workspace = true }
+libc = { workspace = true }
 
 bbr-client-chiavdf-fast = { path = "../chiavdf-fast" }
