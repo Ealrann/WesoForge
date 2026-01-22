@@ -1,0 +1,4 @@
+[submodule "chiavdf"]
+	path = chiavdf
+	url = https://github.com/Ealrann/chiavdf.git
+	branch = bbr

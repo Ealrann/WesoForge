@@ -13,20 +13,23 @@ fn main() {
 
     let chiavdf_dir = env::var("BBR_CHIAVDF_DIR")
         .map(PathBuf::from)
-        // Default to `../bbr_chiavdf` (preferred when present), falling back to `../chiavdf`.
+        // Default to the `chiavdf/` git submodule.
         .unwrap_or_else(|_| {
-            let repo_parent = repo_root.parent().expect("repo_root has parent");
-            let bbr = repo_parent.join("bbr_chiavdf");
-            if bbr
+            let submodule = repo_root.join("chiavdf");
+            if submodule
                 .join("src")
                 .join("c_bindings")
                 .join("fast_wrapper.cpp")
                 .exists()
             {
-                bbr
-            } else {
-                repo_parent.join("chiavdf")
+                return submodule;
             }
+
+            panic!(
+                "chiavdf repo not found at {}. Run `git submodule update --init --recursive` \
+or set BBR_CHIAVDF_DIR to a chiavdf checkout.",
+                submodule.display()
+            );
         });
     let chiavdf_src = chiavdf_dir.join("src");
 
