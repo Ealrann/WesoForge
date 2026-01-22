@@ -11,6 +11,8 @@ mod worker;
 
 use clap::Parser;
 
+use bbr_client_chiavdf_fast::{set_bucket_memory_budget_bytes, set_enable_streaming_stats};
+
 use crate::bench::run_benchmark;
 use crate::cli::Cli;
 use crate::controller::run_controller;
@@ -21,12 +23,14 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     if let Some(algo) = cli.bench {
+        set_bucket_memory_budget_bytes(cli.mem_budget_bytes);
+        set_enable_streaming_stats(true);
         run_benchmark(algo)?;
         return Ok(());
     }
 
     if cli.worker {
-        return run_worker().await;
+        return run_worker(cli.mem_budget_bytes).await;
     }
 
     let code = run_controller(cli).await?;

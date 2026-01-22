@@ -5,7 +5,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 
 use bbr_client_chiavdf_fast::{
-    prove_one_weso_fast, prove_one_weso_fast_streaming, prove_one_weso_fast_streaming_getblock_opt,
+    last_streaming_parameters, last_streaming_stats, prove_one_weso_fast,
+    prove_one_weso_fast_streaming, prove_one_weso_fast_streaming_getblock_opt,
 };
 
 use crate::constants::default_classgroup_element;
@@ -83,6 +84,28 @@ pub fn run_benchmark(algo: u32) -> anyhow::Result<()> {
             println!("Discriminant bits: {BENCH_DISCRIMINANT_BITS}");
             println!("Challenge (b64): {}", B64.encode(BENCH_CHALLENGE));
             println!("Iterations: {}", format_number(BENCH_ITERS));
+            if let Some(params) = last_streaming_parameters() {
+                println!(
+                    "Params: k={} l={} (tuned={})",
+                    params.k, params.l, params.tuned
+                );
+            }
+            if let Some(stats) = last_streaming_stats() {
+                let checkpoint_overhead = stats
+                    .checkpoint_event_time
+                    .saturating_sub(stats.checkpoint_time);
+                let accounted = stats.checkpoint_time + checkpoint_overhead + stats.finalize_time;
+                let other = duration.checked_sub(accounted).unwrap_or_default();
+                println!(
+                    "Timing: checkpoint_time={} (calls={} updates={}), checkpoint_overhead={}, finalize_time={}, other_time={}",
+                    format_duration(stats.checkpoint_time),
+                    format_number(stats.checkpoint_calls),
+                    format_number(stats.bucket_updates),
+                    format_duration(checkpoint_overhead),
+                    format_duration(stats.finalize_time),
+                    format_duration(other),
+                );
+            }
             println!("Y (b64): {}", B64.encode(y));
             println!("Witness (b64): {}", B64.encode(witness));
             println!("Duration: {}", format_duration(duration));
@@ -122,6 +145,28 @@ pub fn run_benchmark(algo: u32) -> anyhow::Result<()> {
             println!("Discriminant bits: {BENCH_DISCRIMINANT_BITS}");
             println!("Challenge (b64): {}", B64.encode(BENCH_CHALLENGE));
             println!("Iterations: {}", format_number(BENCH_ITERS));
+            if let Some(params) = last_streaming_parameters() {
+                println!(
+                    "Params: k={} l={} (tuned={})",
+                    params.k, params.l, params.tuned
+                );
+            }
+            if let Some(stats) = last_streaming_stats() {
+                let checkpoint_overhead = stats
+                    .checkpoint_event_time
+                    .saturating_sub(stats.checkpoint_time);
+                let accounted = stats.checkpoint_time + checkpoint_overhead + stats.finalize_time;
+                let other = duration.checked_sub(accounted).unwrap_or_default();
+                println!(
+                    "Timing: checkpoint_time={} (calls={} updates={}), checkpoint_overhead={}, finalize_time={}, other_time={}",
+                    format_duration(stats.checkpoint_time),
+                    format_number(stats.checkpoint_calls),
+                    format_number(stats.bucket_updates),
+                    format_duration(checkpoint_overhead),
+                    format_duration(stats.finalize_time),
+                    format_duration(other),
+                );
+            }
             println!("Y (b64): {}", B64.encode(y));
             println!("Witness (b64): {}", B64.encode(witness));
             println!("Duration: {}", format_duration(duration));

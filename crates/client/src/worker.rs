@@ -8,6 +8,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use bbr_client_chiavdf_fast::{
     prove_one_weso_fast_streaming, prove_one_weso_fast_streaming_with_progress,
+    set_bucket_memory_budget_bytes,
 };
 
 use crate::backend::submit_job;
@@ -284,11 +285,13 @@ impl WorkerRunner {
     }
 }
 
-pub async fn run_worker() -> anyhow::Result<()> {
+pub async fn run_worker(mem_budget_bytes: u64) -> anyhow::Result<()> {
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
         .build()
         .context("build http client")?;
+
+    set_bucket_memory_budget_bytes(mem_budget_bytes);
 
     let runner = WorkerRunner { http };
 

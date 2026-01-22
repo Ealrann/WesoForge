@@ -47,10 +47,13 @@ impl WorkerProcess {
     async fn spawn(
         worker_idx: usize,
         events_tx: mpsc::UnboundedSender<WorkerEvent>,
+        mem_budget_bytes: u64,
     ) -> anyhow::Result<Self> {
         let exe = std::env::current_exe().context("current_exe")?;
         let mut child = Command::new(exe)
             .arg("--worker")
+            .arg("--mem")
+            .arg(format!("{mem_budget_bytes}B"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -439,7 +442,7 @@ impl Controller {
 
         let mut workers: Vec<WorkerProcess> = Vec::with_capacity(cli.parallel);
         for idx in 0..cli.parallel {
-            workers.push(WorkerProcess::spawn(idx, events_tx.clone()).await?);
+            workers.push(WorkerProcess::spawn(idx, events_tx.clone(), cli.mem_budget_bytes).await?);
         }
 
         let startup = format!(

@@ -2,6 +2,7 @@
 
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -33,6 +34,32 @@ pub enum ChiavdfFastError {
     UnexpectedLength(usize),
 }
 
+/// Parameters selected by the streaming prover.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamingParameters {
+    /// Bucket width parameter.
+    pub k: u32,
+    /// Number of rows.
+    pub l: u32,
+    /// Whether the selection came from the memory-budget tuner.
+    pub tuned: bool,
+}
+
+/// Timing counters collected by the native streaming prover (when enabled).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamingStats {
+    /// Total time spent updating buckets at checkpoint boundaries.
+    pub checkpoint_time: Duration,
+    /// Total time spent handling checkpoint events (includes checkpoint_time).
+    pub checkpoint_event_time: Duration,
+    /// Total time spent in the streaming finalization/folding phase.
+    pub finalize_time: Duration,
+    /// Number of checkpoint calls processed.
+    pub checkpoint_calls: u64,
+    /// Number of per-bucket updates performed during checkpoint processing.
+    pub bucket_updates: u64,
+}
+
 fn take_result(array: ffi::ChiavdfByteArray) -> Result<Vec<u8>, ChiavdfFastError> {
     if array.data.is_null() || array.length == 0 {
         return Err(ChiavdfFastError::NativeFailure);
@@ -48,6 +75,76 @@ fn take_result(array: ffi::ChiavdfByteArray) -> Result<Vec<u8>, ChiavdfFastError
     }
 
     Ok(out)
+}
+
+/// Set the memory budget (in bytes) used by the streaming prover parameter tuner.
+///
+/// This budget is per process; when running multiple worker processes, each
+/// worker should set its own budget.
+///
+/// If `bytes` is 0, the native library falls back to its default heuristic.
+pub fn set_bucket_memory_budget_bytes(bytes: u64) {
+    // SAFETY: This is a simple configuration setter with no pointers.
+    unsafe { ffi::chiavdf_set_bucket_memory_budget_bytes(bytes) };
+}
+
+/// Enable or disable native timing counters for the streaming prover.
+///
+/// Intended for benchmarking/tuning; keep disabled for normal operation.
+pub fn set_enable_streaming_stats(enable: bool) {
+    // SAFETY: This is a simple configuration setter with no pointers.
+    unsafe { ffi::chiavdf_set_enable_streaming_stats(enable) };
+}
+
+/// Return the most recent `(k,l)` parameters selected for a streaming proof on the current thread.
+///
+/// Intended for debugging/benchmarking.
+pub fn last_streaming_parameters() -> Option<StreamingParameters> {
+    let mut k: u32 = 0;
+    let mut l: u32 = 0;
+    let mut tuned: bool = false;
+
+    // SAFETY: We pass pointers to initialized scalars.
+    let ok = unsafe {
+        ffi::chiavdf_get_last_streaming_parameters(
+            std::ptr::addr_of_mut!(k),
+            std::ptr::addr_of_mut!(l),
+            std::ptr::addr_of_mut!(tuned),
+        )
+    };
+
+    ok.then_some(StreamingParameters { k, l, tuned })
+}
+
+/// Return timing counters for the most recent streaming proof on the current thread.
+///
+/// Returns `None` if timing collection is disabled or no streaming proof has been
+/// computed successfully on this thread since enabling it.
+pub fn last_streaming_stats() -> Option<StreamingStats> {
+    let mut checkpoint_total_ns: u64 = 0;
+    let mut checkpoint_event_total_ns: u64 = 0;
+    let mut finalize_total_ns: u64 = 0;
+    let mut checkpoint_calls: u64 = 0;
+    let mut bucket_updates: u64 = 0;
+
+    // SAFETY: We pass pointers to initialized scalars.
+    let ok = unsafe {
+        ffi::chiavdf_get_last_streaming_stats(
+            std::ptr::addr_of_mut!(checkpoint_total_ns),
+            std::ptr::addr_of_mut!(checkpoint_event_total_ns),
+            std::ptr::addr_of_mut!(finalize_total_ns),
+            std::ptr::addr_of_mut!(checkpoint_calls),
+            std::ptr::addr_of_mut!(bucket_updates),
+        )
+    };
+
+    ok.then_some(StreamingStats {
+        checkpoint_time: Duration::from_nanos(checkpoint_total_ns),
+        checkpoint_event_time: Duration::from_nanos(checkpoint_event_total_ns),
+        finalize_time: Duration::from_nanos(finalize_total_ns),
+        checkpoint_calls,
+        bucket_updates,
+    })
 }
 
 /// Compute a compact (witness_type=0) Wesolowski proof using the fast chiavdf engine.
