@@ -11,12 +11,13 @@ use bbr_client_chiavdf_fast::{
     set_bucket_memory_budget_bytes,
 };
 
-use crate::backend::submit_job;
+use crate::backend::{BackendError, submit_job};
 use crate::constants::{DISCRIMINANT_BITS, default_classgroup_element};
 use crate::format::{
     field_vdf_label, format_duration, format_job_done_line, humanize_submit_reason,
 };
 use crate::protocol::{WorkerCommand, WorkerJobSpec, WorkerUpdate, worker_send_update};
+use crate::submitter::{load_submitter_config, submitter_config_path};
 
 #[derive(Debug)]
 struct JobOutcome {
@@ -57,10 +58,12 @@ impl JobOutcome {
 
 struct WorkerRunner {
     http: reqwest::Client,
+    submitter: crate::submitter::SubmitterConfig,
+    warned_invalid_reward_address: bool,
 }
 
 impl WorkerRunner {
-    async fn handle_command(&self, cmd: WorkerCommand) -> Option<WorkerUpdate> {
+    async fn handle_command(&mut self, cmd: WorkerCommand) -> Option<WorkerUpdate> {
         match cmd {
             WorkerCommand::Stop => None,
             WorkerCommand::Job(spec) => {
@@ -70,7 +73,7 @@ impl WorkerRunner {
         }
     }
 
-    async fn run_job(&self, spec: WorkerJobSpec) -> JobOutcome {
+    async fn run_job(&mut self, spec: WorkerJobSpec) -> JobOutcome {
         let started_at = Instant::now();
         let height = spec.job.height;
         let field_vdf = spec.job.field_vdf;
@@ -231,7 +234,7 @@ impl WorkerRunner {
     }
 
     async fn submit_witness(
-        &self,
+        &mut self,
         spec: &WorkerJobSpec,
         witness: &[u8],
         output_mismatch: bool,
@@ -244,12 +247,15 @@ impl WorkerRunner {
                 return Err("Error (lease expired)".to_string());
             }
 
+            let reward_address = self.submitter.reward_address.as_deref();
             match submit_job(
                 &self.http,
                 &spec.backend_url,
                 spec.job.job_id,
                 &spec.lease_id,
                 witness,
+                reward_address,
+                self.submitter.name.as_deref(),
             )
             .await
             {
@@ -267,6 +273,24 @@ impl WorkerRunner {
                     return Ok(status);
                 }
                 Err(err) => {
+                    if matches!(
+                        err.downcast_ref::<BackendError>(),
+                        Some(BackendError::InvalidRewardAddress)
+                    ) && reward_address.is_some()
+                    {
+                        if !self.warned_invalid_reward_address {
+                            self.warned_invalid_reward_address = true;
+                            let cfg_path = submitter_config_path()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|_| "<unknown>".to_string());
+                            eprintln!(
+                                "warning: backend rejected configured reward address; submitting without reward metadata (check {cfg_path})"
+                            );
+                        }
+                        self.submitter.reward_address = None;
+                        continue;
+                    }
+
                     let err_msg = format!("{err:#}");
                     if last_submit_err.as_deref() != Some(&err_msg) {
                         last_submit_err = Some(err_msg.clone());
@@ -293,7 +317,20 @@ pub async fn run_worker(mem_budget_bytes: u64) -> anyhow::Result<()> {
 
     set_bucket_memory_budget_bytes(mem_budget_bytes);
 
-    let runner = WorkerRunner { http };
+    let submitter = match load_submitter_config() {
+        Ok(Some(cfg)) => cfg,
+        Ok(None) => crate::submitter::SubmitterConfig::default(),
+        Err(err) => {
+            eprintln!("worker: failed to read submitter config: {err:#}");
+            crate::submitter::SubmitterConfig::default()
+        }
+    };
+
+    let mut runner = WorkerRunner {
+        http,
+        submitter,
+        warned_invalid_reward_address: false,
+    };
 
     tokio::spawn(async { while tokio::signal::ctrl_c().await.is_ok() {} });
 

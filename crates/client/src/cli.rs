@@ -1,6 +1,16 @@
 use clap::Parser;
 use reqwest::Url;
 
+#[cfg(feature = "prod-backend")]
+const DEFAULT_BACKEND_URL: &str = "https://REPLACE-ME.invalid";
+
+#[cfg(not(feature = "prod-backend"))]
+const DEFAULT_BACKEND_URL: &str = "http://127.0.0.1:8080";
+
+fn default_backend_url() -> Url {
+    Url::parse(DEFAULT_BACKEND_URL).expect("DEFAULT_BACKEND_URL must be a valid URL")
+}
+
 pub fn default_parallel_proofs() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
@@ -54,7 +64,7 @@ fn parse_mem_budget_bytes(input: &str) -> Result<u64, String> {
 #[derive(Debug, Clone, Parser)]
 #[command(name = "bbr-client", version, about = "BBR compact proof worker")]
 pub struct Cli {
-    #[arg(long, env = "BBR_BACKEND_URL", default_value = "http://127.0.0.1:8080")]
+    #[arg(long, env = "BBR_BACKEND_URL", default_value_t = default_backend_url())]
     pub backend_url: Url,
 
     #[arg(long, env = "BBR_WORKER_ID")]

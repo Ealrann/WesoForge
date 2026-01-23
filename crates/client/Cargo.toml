@@ -18,3 +18,7 @@ crossterm = { workspace = true }
 libc = { workspace = true }
 
 bbr-client-chiavdf-fast = { path = "../chiavdf-fast" }
+
+[features]
+# Use the production backend URL as the compiled default for `--backend-url`.
+prod-backend = []

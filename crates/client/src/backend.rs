@@ -3,6 +3,17 @@ use base64::engine::general_purpose::STANDARD as B64;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, thiserror::Error)]
+pub enum BackendError {
+    #[error("invalid reward address")]
+    InvalidRewardAddress,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiErrorBody {
+    code: String,
+}
+
 #[derive(Debug, Serialize)]
 struct WorkRequest {
     count: u32,
@@ -30,6 +41,10 @@ pub struct JobDto {
 struct SubmitRequest {
     lease_id: String,
     witness_b64: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reward_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +73,13 @@ pub async fn fetch_work(
     if !res.status().is_success() {
         let status = res.status();
         let body = res.text().await.unwrap_or_default();
+        if status == reqwest::StatusCode::BAD_REQUEST {
+            if let Ok(err) = serde_json::from_str::<ApiErrorBody>(&body) {
+                if err.code == "invalid_reward_address" {
+                    return Err(BackendError::InvalidRewardAddress.into());
+                }
+            }
+        }
         anyhow::bail!("http {status}: {body}");
     }
     Ok(res.json().await?)
@@ -69,6 +91,8 @@ pub async fn submit_job(
     job_id: u64,
     lease_id: &str,
     witness: &[u8],
+    reward_address: Option<&str>,
+    name: Option<&str>,
 ) -> anyhow::Result<SubmitResponse> {
     let url = backend.join(&format!("api/jobs/{job_id}/submit"))?;
     let res = http
@@ -76,6 +100,8 @@ pub async fn submit_job(
         .json(&SubmitRequest {
             lease_id: lease_id.to_string(),
             witness_b64: B64.encode(witness),
+            reward_address: reward_address.map(str::to_string),
+            name: name.map(str::to_string),
         })
         .send()
         .await?;

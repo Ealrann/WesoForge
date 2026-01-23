@@ -11,11 +11,19 @@ CLI compactor worker:
 
 ```bash
 cd bbr_client
-cargo run -p bbr-client -- \
-  --backend-url http://127.0.0.1:8080
+cargo run -p bbr-client --
 ```
 
 The client will sleep 10 seconds when no jobs are available.
+
+`--backend-url` can still be overridden at runtime (via `--backend-url ...` or `BBR_BACKEND_URL=...`).
+
+To build with the production default backend URL:
+
+```bash
+cd bbr_client
+cargo build -p bbr-client --release --features prod-backend
+```
 
 ## Output
 
