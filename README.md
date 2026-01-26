@@ -14,8 +14,6 @@ https://github.com/Ealrann/chiavdf
 
 ## Build (from source)
 
-All commands below are from the `bbr_client/` directory.
-
 ### CLI (release)
 
 Builds the production client (default backend = `https://weso.forgeros.fr/`) and writes a versioned artifact under `dist/`:
@@ -51,21 +49,13 @@ Notes:
 ./dist/WesoForge-cli_<version>_<arch>
 ```
 
-Override the backend at runtime with `--backend-url` or `BBR_BACKEND_URL`:
-
-```bash
-./dist/WesoForge-cli_<version>_<arch> --backend-url http://127.0.0.1:8080
-```
-
 ## CLI options
 
-See `wesoforge --help` for the full list. Common options:
+See `--help` for the full list. Common options:
 
 - `--backend-url <URL>` (env `BBR_BACKEND_URL`)
 - `-p, --parallel <N>` (env `BBR_PARALLEL_PROOFS`, default = logical CPU count)
 - `--no-tui` (env `BBR_NO_TUI=1`) for plain logs (recommended for large `--parallel` values)
-- `-m, --mem <SIZE>` (env `BBR_MEM_BUDGET`, default `128MB`) per-worker streaming memory budget
-- `--bench <ALGO>` run a local benchmark and exit (example: `--bench 0`)
 
 ## Linux runtime notes
 
