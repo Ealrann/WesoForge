@@ -1,6 +1,8 @@
 target/
 Cargo.lock
+dist/
 
 # GUI UI
 ui/node_modules/
 ui/dist/
+

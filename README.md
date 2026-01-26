@@ -1,39 +1,78 @@
 # WesoForge
 
-CLI compactor worker:
+https://weso.forgeros.fr
 
-- Leases jobs from the WesoForge backend (`https://weso.forgeros.fr`).
-- Computes a compact VDF proof witness via the fast `chiavdf` engine
-- Submits the result back to the backend
-- Loops forever
+WesoForge is a client for **bluebox compaction**. It leases compaction work from the backend, computes compact VDF proof witnesses, and submits results back.
+
+Under the hood it relies on a slightly modified `chiavdf` to improve parallelism for bluebox compaction:
+https://github.com/Ealrann/chiavdf
+
+## What you ship
+
+- **CLI binary**: `WesoForge-cli_<version>_<arch>`
+- **GUI (Linux)**: `WesoForge-gui_<version>_<arch>.AppImage`
+
+## Build (from source)
+
+All commands below are from the `bbr_client/` directory.
+
+### CLI (release)
+
+Builds the production client (default backend = `https://weso.forgeros.fr/`) and writes a versioned artifact under `dist/`:
+
+```bash
+./build-cli.sh
+```
+
+### GUI AppImage (release, Linux)
+
+Builds the AppImage and writes a versioned artifact under `dist/`:
+
+```bash
+./build-gui.sh
+```
+
+Notes:
+- Requires `pnpm` (for the Svelte frontend).
+- Requires the Tauri CLI (`cargo tauri`) to be installed (e.g. `cargo install tauri-cli`).
+- Building the GUI needs the usual Tauri/Linux build deps (GTK/WebKitGTK development packages); package names vary per distro.
 
 ## Run
 
-```bash
-cargo run -p bbr-client --
-```
-
-The client will sleep 10 seconds when no jobs are available.
-
-`--backend-url` can still be overridden at runtime (via `--backend-url ...` or `BBR_BACKEND_URL=...`).
-
-To build with the production default backend URL:
+### GUI
 
 ```bash
-cd bbr_client
-cargo build -p bbr-client --release --features prod-backend
+./dist/WesoForge-gui_<version>_<arch>.AppImage
 ```
 
-## Output
-
-- Default: in-place progress line when stdout is a TTY.
-- `--no-tui` (or `BBR_NO_TUI=1`): newline progress logs (friendlier for piping / `tee`).
-
-## Benchmark
-
-Run a fixed local proof benchmark and exit:
+### CLI
 
 ```bash
-cd bbr_client
-cargo run -p bbr-client -- --bench 0
+./dist/WesoForge-cli_<version>_<arch>
 ```
+
+Override the backend at runtime with `--backend-url` or `BBR_BACKEND_URL`:
+
+```bash
+./dist/WesoForge-cli_<version>_<arch> --backend-url http://127.0.0.1:8080
+```
+
+## CLI options
+
+See `wesoforge --help` for the full list. Common options:
+
+- `--backend-url <URL>` (env `BBR_BACKEND_URL`)
+- `-p, --parallel <N>` (env `BBR_PARALLEL_PROOFS`, default = logical CPU count)
+- `--no-tui` (env `BBR_NO_TUI=1`) for plain logs (recommended for large `--parallel` values)
+- `-m, --mem <SIZE>` (env `BBR_MEM_BUDGET`, default `128MB`) per-worker streaming memory budget
+- `--bench <ALGO>` run a local benchmark and exit (example: `--bench 0`)
+
+## Linux runtime notes
+
+- The CLI binary is dynamically linked (you may need GMP + C++ runtime depending on your distro).
+- The GUI uses the system WebView on Linux (WebKitGTK); depending on distro/version you may need to install the corresponding runtime packages.
+
+## Development (local backend)
+
+- CLI: `scripts/dev_cli.sh`
+- GUI: `scripts/dev_gui.sh`

@@ -58,7 +58,7 @@ fn parse_mem_budget_bytes(input: &str) -> Result<u64, String> {
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "bbr-client", version, about = "BBR compact proof worker")]
+#[command(name = "wesoforge", version, about = "WesoForge compact proof worker")]
 pub struct Cli {
     #[arg(long, env = "BBR_BACKEND_URL", default_value_t = default_backend_url())]
     pub backend_url: Url,

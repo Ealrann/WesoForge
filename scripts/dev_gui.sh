@@ -39,7 +39,4 @@ if ! curl -fsS "http://localhost:5173" >/dev/null 2>&1; then
   exit 1
 fi
 
-# GUI spawns `bbr-client` (CLI) as a child process; ensure it exists next to the GUI binary.
-cargo build -p bbr-client
-
 exec cargo run -p bbr-client-gui -- "$@"

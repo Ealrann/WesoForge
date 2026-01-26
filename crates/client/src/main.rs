@@ -101,11 +101,7 @@ async fn main() -> anyhow::Result<()> {
         spawn_ctrl_c_handler(shutdown.clone(), shutdown_tx);
     }
 
-    let startup = format!(
-        "bbr-client {} parallel={}",
-        env!("CARGO_PKG_VERSION"),
-        cli.parallel
-    );
+    let startup = format!("wesoforge {} parallel={}", env!("CARGO_PKG_VERSION"), cli.parallel);
 
     let mut ui = if tui_enabled { Some(Ui::new(cli.parallel)) } else { None };
     if let Some(ui) = &ui {

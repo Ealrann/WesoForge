@@ -169,6 +169,19 @@ async fn engine_snapshot(state: State<'_, Arc<GuiState>>) -> Result<Option<Statu
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    {
+        // On some Linux/Wayland setups WebKitGTK's DMABUF renderer can fail with errors like:
+        // "Failed to create GBM buffer ... Invalid argument" and render a blank window.
+        // Default to disabling it unless the user explicitly opted in.
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            // SAFETY: this is executed at process startup before spawning any threads.
+            unsafe {
+                std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            }
+        }
+    }
+
     let state = Arc::new(GuiState::default());
     tauri::Builder::default()
         .manage(state)
