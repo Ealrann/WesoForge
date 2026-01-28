@@ -33,7 +33,6 @@
     output_mismatch: boolean;
     submit_reason?: string | null;
     submit_detail?: string | null;
-    accepted_event_id?: number | null;
     error?: string | null;
     compute_ms: number;
     submit_ms: number;
@@ -311,14 +310,18 @@
   }
 
   function outcomeBadge(outcome: JobOutcome) {
-    if (outcome.accepted_event_id != null) {
+    if (outcome.error) {
+      return { label: 'Error', cls: 'border-danger/50 bg-danger/10 text-danger' };
+    }
+    const reason = (outcome.submit_reason ?? '').trim().toLowerCase();
+    if (reason === 'accepted') {
       return { label: 'Accepted', cls: 'border-success/50 bg-success/10 text-success' };
+    }
+    if (reason === 'queued') {
+      return { label: 'Queued', cls: 'border-info/50 bg-info/10 text-info' };
     }
     if (outcome.output_mismatch) {
       return { label: 'Rejected', cls: 'border-danger/50 bg-danger/10 text-danger' };
-    }
-    if (outcome.error) {
-      return { label: 'Error', cls: 'border-danger/50 bg-danger/10 text-danger' };
     }
     return { label: 'Rejected', cls: 'border-muted/40 bg-bg text-muted' };
   }

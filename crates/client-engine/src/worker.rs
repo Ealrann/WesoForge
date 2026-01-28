@@ -22,6 +22,12 @@ fn default_classgroup_element() -> [u8; 100] {
     el
 }
 
+#[derive(Debug)]
+struct SubmitFailure {
+    message: String,
+    drop_inflight: bool,
+}
+
 pub(crate) enum WorkerCommand {
     Job {
         worker_idx: usize,
@@ -112,7 +118,7 @@ async fn run_job(
                 output_mismatch: false,
                 submit_reason: None,
                 submit_detail: None,
-                accepted_event_id: None,
+                drop_inflight: false,
                 error: Some(format!("Error (bad output_b64: {err:#})")),
                 compute_ms: 0,
                 submit_ms: 0,
@@ -129,7 +135,7 @@ async fn run_job(
                 output_mismatch: false,
                 submit_reason: None,
                 submit_detail: None,
-                accepted_event_id: None,
+                drop_inflight: false,
                 error: Some(format!("Error (bad challenge_b64: {err:#})")),
                 compute_ms: 0,
                 submit_ms: 0,
@@ -163,7 +169,7 @@ async fn run_job(
                 output_mismatch: false,
                 submit_reason: None,
                 submit_detail: None,
-                accepted_event_id: None,
+                drop_inflight: false,
                 error: Some(status),
                 compute_ms: compute_started_at.elapsed().as_millis() as u64,
                 submit_ms: 0,
@@ -200,7 +206,7 @@ async fn run_job(
             output_mismatch,
             submit_reason: Some(res.reason),
             submit_detail: Some(res.detail),
-            accepted_event_id: res.accepted_event_id,
+            drop_inflight: false,
             error: None,
             compute_ms,
             submit_ms,
@@ -212,8 +218,8 @@ async fn run_job(
             output_mismatch,
             submit_reason: None,
             submit_detail: None,
-            accepted_event_id: None,
-            error: Some(err),
+            drop_inflight: err.drop_inflight,
+            error: Some(err.message),
             compute_ms,
             submit_ms,
             total_ms: started_at.elapsed().as_millis() as u64,
@@ -345,7 +351,7 @@ async fn submit_witness(
     lease_id: &str,
     lease_expires_at: i64,
     witness: &[u8],
-) -> Result<SubmitResponse, String> {
+) -> Result<SubmitResponse, SubmitFailure> {
     let mut last_submit_err: Option<String> = None;
     let mut attempts: u32 = 0;
     let mut last_log_at = Instant::now().checked_sub(Duration::from_secs(3600)).unwrap_or_else(Instant::now);
@@ -381,7 +387,36 @@ async fn submit_witness(
                             "error: submit rejected for job {job_id}: lease invalid/expired"
                         ),
                     });
-                    return Err("Error (lease invalid/expired)".to_string());
+                    return Err(SubmitFailure {
+                        message: "Error (lease invalid/expired)".to_string(),
+                        drop_inflight: true,
+                    });
+                }
+                if matches!(
+                    err.downcast_ref::<BackendError>(),
+                    Some(BackendError::LeaseConflict)
+                ) {
+                    let _ = internal_tx.send(WorkerInternalEvent::Error {
+                        message: format!(
+                            "error: submit rejected for job {job_id}: lease conflict (already leased by someone else)"
+                        ),
+                    });
+                    return Err(SubmitFailure {
+                        message: "Error (lease conflict)".to_string(),
+                        drop_inflight: true,
+                    });
+                }
+                if matches!(
+                    err.downcast_ref::<BackendError>(),
+                    Some(BackendError::JobNotFound)
+                ) {
+                    let _ = internal_tx.send(WorkerInternalEvent::Error {
+                        message: format!("error: submit rejected for job {job_id}: job not found"),
+                    });
+                    return Err(SubmitFailure {
+                        message: "Error (job not found)".to_string(),
+                        drop_inflight: true,
+                    });
                 }
                 if matches!(
                     err.downcast_ref::<BackendError>(),

@@ -10,6 +10,10 @@ pub(crate) enum BackendError {
     InvalidRewardAddress,
     #[error("invalid or expired lease")]
     LeaseInvalid,
+    #[error("lease conflict")]
+    LeaseConflict,
+    #[error("job not found")]
+    JobNotFound,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,10 +63,24 @@ async fn error_from_response(res: reqwest::Response) -> anyhow::Error {
         if status == reqwest::StatusCode::BAD_REQUEST && err.code == "invalid_reward_address" {
             return BackendError::InvalidRewardAddress.into();
         }
-        if status == reqwest::StatusCode::CONFLICT && err.code == "lease_invalid" {
-            return BackendError::LeaseInvalid.into();
+        if status == reqwest::StatusCode::NOT_FOUND && err.code == "job_not_found" {
+            return BackendError::JobNotFound.into();
+        }
+        if status == reqwest::StatusCode::CONFLICT {
+            if err.code == "lease_invalid" {
+                return BackendError::LeaseInvalid.into();
+            }
+            return BackendError::LeaseConflict.into();
         }
         return anyhow::anyhow!("backend error ({status}) for {url}: {}", err.code);
+    }
+
+    if status == reqwest::StatusCode::CONFLICT {
+        return BackendError::LeaseConflict.into();
+    }
+
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return BackendError::JobNotFound.into();
     }
 
     if is_html_error(&content_type, &body) {
@@ -113,7 +131,6 @@ struct SubmitRequest {
 pub(crate) struct SubmitResponse {
     pub(crate) reason: String,
     pub(crate) detail: String,
-    pub(crate) accepted_event_id: Option<u64>,
 }
 
 pub(crate) async fn fetch_work(

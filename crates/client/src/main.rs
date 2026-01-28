@@ -37,9 +37,6 @@ fn format_outcome_status(outcome: &bbr_client_engine::JobOutcome) -> String {
     if outcome.output_mismatch {
         status.push_str(" (output mismatch)");
     }
-    if let Some(id) = outcome.accepted_event_id {
-        status.push_str(&format!(" (event {id})"));
-    }
     if let Some(detail) = outcome.submit_detail.as_deref() {
         if !detail.is_empty() && detail != reason {
             status.push_str(&format!(" ({detail})"));

@@ -108,8 +108,12 @@ pub struct JobOutcome {
     pub submit_reason: Option<String>,
     /// Backend submission detail string, if submission happened.
     pub submit_detail: Option<String>,
-    /// Backend event identifier, when accepted.
-    pub accepted_event_id: Option<u64>,
+    /// Remove this job from the local in-flight store (resume file) even on failure.
+    ///
+    /// This is used for terminal submission rejections where retrying would be useless
+    /// (e.g. `job_not_found`, lease conflicts).
+    #[serde(default)]
+    pub drop_inflight: bool,
     /// Human-readable failure message, for compute/submit errors.
     pub error: Option<String>,
     /// Total compute time (milliseconds).

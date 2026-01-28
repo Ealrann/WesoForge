@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 
@@ -364,9 +365,7 @@ impl EngineRuntime {
                     self.recent_jobs.pop_front();
                 }
 
-                if outcome.accepted_event_id.is_some()
-                    || matches!(outcome.submit_reason.as_deref(), Some("accepted"))
-                {
+                if outcome.drop_inflight || (outcome.error.is_none() && outcome.submit_reason.is_some()) {
                     if let Some(store) = &mut self.inflight {
                         if store.remove_job(outcome.job.job_id) {
                             if let Err(err) = store.persist().await {
@@ -636,6 +635,34 @@ async fn run_engine(
             None
         }
     };
+
+    if let Some(store) = inflight.as_mut() {
+        let now = Utc::now().timestamp();
+        let expired_job_ids: Vec<u64> = store
+            .entries()
+            .filter(|entry| entry.lease_expires_at <= now)
+            .map(|entry| entry.job.job_id)
+            .collect();
+
+        if !expired_job_ids.is_empty() {
+            let expired_count = expired_job_ids.len();
+            for job_id in expired_job_ids {
+                store.remove_job(job_id);
+            }
+
+            if let Err(err) = store.persist().await {
+                let _ = inner.event_tx.send(EngineEvent::Warning {
+                    message: format!("warning: failed to persist expired inflight lease cleanup: {err:#}"),
+                });
+            } else {
+                let _ = inner.event_tx.send(EngineEvent::Warning {
+                    message: format!(
+                        "Discarded {expired_count} expired inflight lease(s) from previous run."
+                    ),
+                });
+            }
+        }
+    }
 
     let mut pending = VecDeque::new();
     if let Some(store) = inflight.as_ref() {
