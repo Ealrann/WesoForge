@@ -41,7 +41,14 @@ rm -f "$TARGET_DIR/.wesoforge-write-test" >/dev/null 2>&1 || true
 export CARGO_TARGET_DIR="$TARGET_DIR"
 
 echo "Building WesoForge CLI (wesoforge)..." >&2
-cargo build -p bbr-client --release --features prod-backend --locked
+CARGO_ARGS=(build -p bbr-client --release --features prod-backend)
+if [[ "${CARGO_LOCKED:-0}" == "1" ]]; then
+  CARGO_ARGS+=(--locked)
+fi
+if [[ "${CARGO_OFFLINE:-0}" == "1" ]]; then
+  CARGO_ARGS+=(--offline)
+fi
+cargo "${CARGO_ARGS[@]}"
 
 VERSION="$(workspace_version)"
 if [[ -z "${VERSION:-}" ]]; then
@@ -51,7 +58,7 @@ fi
 ARCH="$(platform_arch)"
 
 BIN_SRC="$TARGET_DIR/release/wesoforge"
-BIN_DST="$DIST_DIR/WesoForge-cli_${VERSION}_${ARCH}"
+BIN_DST="$DIST_DIR/WesoForge-cli_Linux_${VERSION}_${ARCH}"
 
 if [[ ! -f "$BIN_SRC" ]]; then
   echo "error: expected binary not found at: $BIN_SRC" >&2

@@ -78,7 +78,19 @@ echo "Building WesoForge GUI AppImage (features: $FEATURES)..." >&2
   # linuxdeploy's bundled `strip` can be too old for modern `.relr.dyn` ELF sections.
   # Skip stripping to keep the AppImage build reliable across distros.
   export NO_STRIP=1
-  cargo tauri build --features "$FEATURES" --bundles appimage -- --locked
+  CARGO_ARGS=()
+  if [[ "${CARGO_LOCKED:-0}" == "1" ]]; then
+    CARGO_ARGS+=(--locked)
+  fi
+  if [[ "${CARGO_OFFLINE:-0}" == "1" ]]; then
+    CARGO_ARGS+=(--offline)
+  fi
+
+  if [[ "${#CARGO_ARGS[@]}" -gt 0 ]]; then
+    cargo tauri build --features "$FEATURES" --bundles appimage -- "${CARGO_ARGS[@]}"
+  else
+    cargo tauri build --features "$FEATURES" --bundles appimage
+  fi
 )
 
 APPIMAGE_DIR="$TARGET_DIR/release/bundle/appimage"
