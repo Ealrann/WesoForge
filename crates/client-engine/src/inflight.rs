@@ -115,6 +115,37 @@ fn xdg_state_home() -> anyhow::Result<PathBuf> {
         return Ok(dir);
     }
 
+    // On Windows we should not require HOME to be set: the conventional location
+    // for per-user application state is %LOCALAPPDATA%.
+    #[cfg(windows)]
+    {
+        if let Some(dir) = std::env::var_os("LOCALAPPDATA") {
+            let dir = PathBuf::from(dir);
+            if dir.as_os_str().is_empty() {
+                anyhow::bail!("LOCALAPPDATA is set but empty");
+            }
+            return Ok(dir);
+        }
+
+        // Some restricted environments might not set LOCALAPPDATA; fall back to APPDATA.
+        if let Some(dir) = std::env::var_os("APPDATA") {
+            let dir = PathBuf::from(dir);
+            if dir.as_os_str().is_empty() {
+                anyhow::bail!("APPDATA is set but empty");
+            }
+            return Ok(dir);
+        }
+
+        // Fall back to USERPROFILE if available.
+        if let Some(dir) = std::env::var_os("USERPROFILE") {
+            let dir = PathBuf::from(dir);
+            if dir.as_os_str().is_empty() {
+                anyhow::bail!("USERPROFILE is set but empty");
+            }
+            return Ok(dir.join("AppData").join("Local"));
+        }
+    }
+
     let home = std::env::var_os("HOME").ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
     let home = PathBuf::from(home);
     if home.as_os_str().is_empty() {
