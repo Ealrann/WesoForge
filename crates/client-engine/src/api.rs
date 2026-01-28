@@ -75,6 +75,9 @@ impl EngineConfig {
 pub struct JobSummary {
     /// Backend job identifier.
     pub job_id: u64,
+    /// Number of proofs in the group, when this summary represents a grouped job (Trick 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_proofs: Option<u32>,
     /// Block height.
     pub height: u32,
     /// Compressible VDF field identifier (1..=4).

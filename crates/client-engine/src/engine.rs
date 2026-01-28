@@ -335,6 +335,7 @@ impl EngineRuntime {
                     WorkItem::Job(item) => {
                         let job_summary = JobSummary {
                             job_id: item.job.job_id,
+                            group_proofs: None,
                             height: item.job.height,
                             field_vdf: item.job.field_vdf,
                             number_of_iterations: item.job.number_of_iterations,
@@ -365,6 +366,7 @@ impl EngineRuntime {
 
                         let job_summary = JobSummary {
                             job_id: first.job_id,
+                            group_proofs: Some(group.jobs.len() as u32),
                             height: first.height,
                             field_vdf: first.field_vdf,
                             number_of_iterations: total_iters,
@@ -441,13 +443,12 @@ impl EngineRuntime {
                                     );
                                 }
                                 WorkItem::Group(group) => {
-                                    for job in &group.jobs {
-                                        changed |= store.insert_job(
-                                            group.lease_id.clone(),
-                                            group.lease_expires_at,
-                                            job.clone(),
-                                        );
-                                    }
+                                    changed |= store.insert_group(
+                                        group.group_id,
+                                        group.lease_id.clone(),
+                                        group.lease_expires_at,
+                                        group.jobs.clone(),
+                                    );
                                 }
                             }
                         }
@@ -817,45 +818,92 @@ async fn run_engine(
 
     if let Some(store) = inflight.as_mut() {
         let now = Utc::now().timestamp();
-        let expired_job_ids: Vec<u64> = store
-            .entries()
-            .filter(|entry| entry.lease_expires_at <= now)
-            .map(|entry| entry.job.job_id)
-            .collect();
+
+        let mut expired_job_ids: HashSet<u64> = HashSet::new();
+        for entry in store.job_entries() {
+            if entry.lease_expires_at <= now {
+                expired_job_ids.insert(entry.job.job_id);
+            }
+        }
+        for group in store.group_entries() {
+            if group.lease_expires_at <= now {
+                for job in &group.jobs {
+                    expired_job_ids.insert(job.job_id);
+                }
+            }
+        }
 
         if !expired_job_ids.is_empty() {
-            let expired_count = expired_job_ids.len();
+            let before = store.total_jobs();
             for job_id in expired_job_ids {
                 store.remove_job(job_id);
             }
+            let removed = before.saturating_sub(store.total_jobs());
+            if removed > 0 {
+                if let Err(err) = store.persist().await {
+                    let _ = inner.event_tx.send(EngineEvent::Warning {
+                        message: format!(
+                            "warning: failed to persist expired inflight lease cleanup: {err:#}"
+                        ),
+                    });
+                } else {
+                    let _ = inner.event_tx.send(EngineEvent::Warning {
+                        message: format!(
+                            "Discarded {removed} expired inflight lease(s) from previous run."
+                        ),
+                    });
+                }
+            }
+        }
 
+        if cfg.use_groups && store.promote_jobs_to_groups_by_challenge(cfg.group_max_proofs_per_group) {
+            let message = "Migrated inflight proof leases into grouped work (resume will run groups)."
+                .to_string();
+            let _ = inner.event_tx.send(EngineEvent::Warning { message });
             if let Err(err) = store.persist().await {
-                let _ = inner.event_tx.send(EngineEvent::Warning {
-                    message: format!("warning: failed to persist expired inflight lease cleanup: {err:#}"),
-                });
-            } else {
-                let _ = inner.event_tx.send(EngineEvent::Warning {
-                    message: format!(
-                        "Discarded {expired_count} expired inflight lease(s) from previous run."
-                    ),
-                });
+                let message =
+                    format!("warning: failed to persist migrated inflight leases: {err:#}");
+                let _ = inner.event_tx.send(EngineEvent::Warning { message });
             }
         }
     }
 
     let mut pending = VecDeque::new();
     if let Some(store) = inflight.as_ref() {
-        for entry in store.entries() {
+        if cfg.use_groups {
+            for group in store.group_entries() {
+                pending.push_back(WorkItem::Group(BackendWorkGroup {
+                    group_id: group.group_id,
+                    lease_id: group.lease_id.clone(),
+                    lease_expires_at: group.lease_expires_at,
+                    jobs: group.jobs.clone(),
+                }));
+            }
+        }
+
+        for entry in store.job_entries() {
             pending.push_back(WorkItem::Job(WorkJobItem {
                 lease_id: entry.lease_id.clone(),
                 lease_expires_at: entry.lease_expires_at,
                 job: entry.job.clone(),
             }));
         }
+
+        if !cfg.use_groups {
+            for group in store.group_entries() {
+                for job in &group.jobs {
+                    pending.push_back(WorkItem::Job(WorkJobItem {
+                        lease_id: group.lease_id.clone(),
+                        lease_expires_at: group.lease_expires_at,
+                        job: job.clone(),
+                    }));
+                }
+            }
+        }
         if !pending.is_empty() {
             let message = format!(
                 "Loaded {} inflight lease(s) from previous run; processing them before leasing new work.",
-                pending.len()
+                store.total_jobs()
             );
             let _ = inner.event_tx.send(EngineEvent::Warning { message });
         }

@@ -78,6 +78,15 @@ impl Ui {
     }
 
     pub(crate) fn set_worker_job(&mut self, worker_idx: usize, job: &JobSummary) {
+        if let Some(count) = job.group_proofs {
+            self.set_worker_work(
+                worker_idx,
+                format!("Group {count} proofs"),
+                job.number_of_iterations,
+            );
+            return;
+        }
+
         let field = field_vdf_label(job.field_vdf);
         self.set_worker_work(
             worker_idx,

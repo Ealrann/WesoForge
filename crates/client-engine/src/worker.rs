@@ -149,6 +149,7 @@ async fn run_job(
 
     let job_summary = JobSummary {
         job_id: job.job_id,
+        group_proofs: None,
         height: job.height,
         field_vdf: job.field_vdf,
         number_of_iterations: job.number_of_iterations,
@@ -299,6 +300,7 @@ async fn run_group(
                 worker_idx,
                 job: JobSummary {
                     job_id: job.job_id,
+                    group_proofs: None,
                     height: job.height,
                     field_vdf: job.field_vdf,
                     number_of_iterations: job.number_of_iterations,
@@ -326,6 +328,7 @@ async fn run_group(
                     worker_idx,
                     job: JobSummary {
                         job_id: job.job_id,
+                        group_proofs: None,
                         height: job.height,
                         field_vdf: job.field_vdf,
                         number_of_iterations: job.number_of_iterations,
@@ -358,6 +361,7 @@ async fn run_group(
                     worker_idx,
                     job: JobSummary {
                         job_id: job.job_id,
+                        group_proofs: None,
                         height: job.height,
                         field_vdf: job.field_vdf,
                         number_of_iterations: job.number_of_iterations,
@@ -384,6 +388,7 @@ async fn run_group(
                         worker_idx,
                         job: JobSummary {
                             job_id: job.job_id,
+                            group_proofs: None,
                             height: job.height,
                             field_vdf: job.field_vdf,
                             number_of_iterations: job.number_of_iterations,
@@ -431,6 +436,7 @@ async fn run_group(
                     worker_idx,
                     job: JobSummary {
                         job_id: job.job_id,
+                        group_proofs: None,
                         height: job.height,
                         field_vdf: job.field_vdf,
                         number_of_iterations: job.number_of_iterations,
@@ -458,6 +464,7 @@ async fn run_group(
     for (job, (witness, output_mismatch)) in jobs.into_iter().zip(witnesses.into_iter()) {
         let job_summary = JobSummary {
             job_id: job.job_id,
+            group_proofs: None,
             height: job.height,
             field_vdf: job.field_vdf,
             number_of_iterations: job.number_of_iterations,
