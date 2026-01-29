@@ -11,8 +11,8 @@
     parallel?: number | null;
     mode?: WorkMode | null;
     max_proofs_per_group?: number | null;
+    mem_budget_bytes?: number | null;
   };
- 
   const appVersion = pkg.version;
   const PARALLEL_STORAGE_KEY = 'bbr_parallel_workers';
 
@@ -76,12 +76,13 @@
   let draftCfg = $state<SubmitterConfig>({});
   let logsOpen = $state(false);
 
-  let parallel = $state<number>(4);
-  let mode = $state<WorkMode>('proof');
-  let maxProofsPerGroup = $state<number>(100);
-  let running = $state(false);
-  let stopRequested = $state(false);
-  let runError = $state<string | null>(null);
+	  let parallel = $state<number>(4);
+	  let mode = $state<WorkMode>('proof');
+	  let maxProofsPerGroup = $state<number>(100);
+	  let memBudgetBytes = $state<string>(String(128 * 1024 * 1024));
+	  let running = $state(false);
+	  let stopRequested = $state(false);
+	  let runError = $state<string | null>(null);
 
   let workers = $state<WorkerSnapshot[]>([]);
   let recentJobs = $state<JobOutcome[]>([]);
@@ -446,10 +447,12 @@
           maxProofsPerGroup = Math.min(200, Math.max(1, Math.floor(maxProofsPerGroup)));
         }
       }
+      const mem = Number(memBudgetBytes);
       const opts: StartOptions = {
         parallel,
         mode,
-        max_proofs_per_group: mode === 'group' ? maxProofsPerGroup : null
+        max_proofs_per_group: mode === 'group' ? maxProofsPerGroup : null,
+        mem_budget_bytes: Number.isFinite(mem) ? mem : 128 * 1024 * 1024
       };
       await invoke<void>('start_client', { opts });
       running = true;
@@ -604,37 +607,53 @@
  		            class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
  		            type="number"
  		            min="1"
-		            max="512"
+ 		            max="512"
  		            step="1"
  		            bind:value={parallel}
-		            onchange={commitParallel}
+ 		            onchange={commitParallel}
  		          />
  		        </label>
  
-              <label class="flex items-center justify-between gap-4 text-sm">
-                <span class="text-muted">Mode</span>
-                <select
-                  class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-                  bind:value={mode}
-                >
-                  <option value="proof">Proof</option>
-                  <option value="group">Group</option>
-                </select>
-              </label>
+             <label class="flex items-center justify-between gap-4 text-sm">
+               <span class="text-muted">Memory budget</span>
+               <select
+                 class="w-36 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+                 bind:value={memBudgetBytes}
+               >
+                 <option value={String(128 * 1024 * 1024)}>128 MiB</option>
+                 <option value={String(256 * 1024 * 1024)}>256 MiB</option>
+                 <option value={String(512 * 1024 * 1024)}>512 MiB</option>
+                 <option value={String(1024 * 1024 * 1024)}>1 GiB</option>
+                 <option value={String(2 * 1024 * 1024 * 1024)}>2 GiB</option>
+                 <option value={String(4 * 1024 * 1024 * 1024)}>4 GiB</option>
+                 <option value={String(8 * 1024 * 1024 * 1024)}>8 GiB</option>
+               </select>
+             </label>
  
-              {#if mode === 'group'}
-                <label class="flex items-center justify-between gap-4 text-sm">
-                  <span class="text-muted">Max proofs / group</span>
-                  <input
-                    class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-                    type="number"
-                    min="1"
-                    max="200"
-                    step="1"
-                    bind:value={maxProofsPerGroup}
-                  />
-                </label>
-              {/if}
+             <label class="flex items-center justify-between gap-4 text-sm">
+               <span class="text-muted">Mode</span>
+               <select
+                 class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+                 bind:value={mode}
+               >
+                 <option value="proof">Proof</option>
+                 <option value="group">Group</option>
+               </select>
+             </label>
+ 
+             {#if mode === 'group'}
+               <label class="flex items-center justify-between gap-4 text-sm">
+                 <span class="text-muted">Max proofs / group</span>
+                 <input
+                   class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+                   type="number"
+                   min="1"
+                   max="200"
+                   step="1"
+                   bind:value={maxProofsPerGroup}
+                 />
+               </label>
+             {/if}
  		      </div>
 
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">

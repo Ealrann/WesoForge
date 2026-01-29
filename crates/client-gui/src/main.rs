@@ -41,6 +41,7 @@ struct StartOptions {
     parallel: Option<u32>,
     mode: Option<WorkMode>,
     max_proofs_per_group: Option<u32>,
+    mem_budget_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -127,12 +128,17 @@ async fn start_client(
         .unwrap_or(EngineConfig::DEFAULT_GROUP_MAX_PROOFS_PER_GROUP)
         .clamp(1, 200);
 
+    let mem_budget_bytes = opts
+        .mem_budget_bytes
+        .filter(|v| *v > 0)
+        .unwrap_or(128 * 1024 * 1024);
+
     let engine = start_engine(EngineConfig {
         backend_url: default_backend_url(),
         parallel,
         use_groups,
         group_max_proofs_per_group,
-        mem_budget_bytes: 128 * 1024 * 1024,
+        mem_budget_bytes,
         submitter,
         idle_sleep: Duration::ZERO,
         progress_steps: GUI_PROGRESS_STEPS,

@@ -286,7 +286,8 @@ impl EngineRuntime {
         let http = self.http.clone();
         let backend = self.cfg.backend_url.clone();
         let use_groups = self.cfg.use_groups;
-        let group_count = self.cfg.parallel.max(1).min(32) as u32;
+        // Only lease as many groups as needed to fill currently idle workers.
+        let group_count = count.min(32) as u32;
         let max_proofs_per_group = self.cfg.group_max_proofs_per_group;
         let count = count;
         self.fetch_task = Some(tokio::spawn(async move {
