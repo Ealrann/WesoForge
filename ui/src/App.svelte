@@ -3,9 +3,12 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import PopupFrame from './components/PopupFrame.svelte';
+  import pkg from '../package.json';
 
   type SubmitterConfig = { reward_address?: string | null; name?: string | null };
   type StartOptions = { parallel?: number | null };
+
+  const appVersion = pkg.version;
 
   type WorkerStage = 'Idle' | 'Computing' | 'Submitting';
 
@@ -435,19 +438,20 @@
 <div class="h-screen bg-bg text-fg flex flex-col overflow-hidden">
   <header class="border-b border-border bg-header text-on-header">
 	    <div class="flex w-full items-center justify-between gap-4 px-6 py-4">
-	      <div class="flex items-center gap-2">
-	        <img
-	          src="/logo-64.avif"
-	          alt="WesoForge logo"
+      <div class="flex items-center gap-2">
+        <img
+          src="/logo-64.avif"
+          alt="WesoForge logo"
 	          class="h-9 w-9"
 	          width="36"
 	          height="36"
 	          decoding="async"
 	        />
 	        <h1 class="font-itc text-xl font-semibold relative top-0.5">WesoForge</h1>
-	      </div>
+      </div>
 
       <div class="flex items-center gap-3">
+        <span class="text-xs font-mono text-on-header/70">v{appVersion}</span>
         <button
           type="button"
           class="rounded border border-border/60 px-2 py-2 text-on-header hover:text-accent hover:border-accent/60 transition-colors"
@@ -503,9 +507,9 @@
               />
             </svg>
 	        </button>
-	      </div>
-	    </div>
-	  </header>
+      </div>
+    </div>
+  </header>
 
 	  <main class="flex w-full flex-1 flex-col gap-6 px-6 py-6 min-h-0 overflow-auto">
 	    {#if runError}
@@ -626,7 +630,7 @@
       </div>
     </section>
 
-		    <section class="rounded border border-border bg-surface flex min-h-0 flex-col lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:row-span-2">
+		    <section class="rounded border border-border bg-surface hidden min-h-0 flex-col lg:flex lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:row-span-2">
 	      <div class="flex items-center justify-between border-b border-border px-4 py-3">
 	        <h2 class="text-sm font-semibold">Recent submissions</h2>
 	      </div>
