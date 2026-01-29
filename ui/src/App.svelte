@@ -734,7 +734,7 @@
       </div>
     </section>
 
-		    <section class="rounded border border-border bg-surface hidden min-h-0 flex-col lg:flex lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:row-span-2">
+    <section class="rounded border border-border bg-surface hidden min-h-0 flex-col lg:flex lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:row-span-2">
 	      <div class="flex items-center justify-between border-b border-border px-4 py-3">
 	        <h2 class="text-sm font-semibold">Recent submissions</h2>
 	      </div>
