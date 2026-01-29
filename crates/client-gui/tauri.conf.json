@@ -1,6 +1,6 @@
 {
   "productName": "WesoForge",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "identifier": "com.ealrann.bbr-client",
   "build": {
     "beforeDevCommand": "pnpm -C ../ui dev",
