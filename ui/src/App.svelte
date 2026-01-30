@@ -214,6 +214,19 @@
     }
   }
 
+  function invokeWithTimeout<T>(cmd: string, timeoutMs: number): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`invoke(${cmd}) timed out after ${timeoutMs}ms`)), timeoutMs);
+    });
+    return Promise.race([
+      invoke<T>(cmd).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+      }),
+      timeout
+    ]);
+  }
+
   async function refreshSnapshotSoon(maxAttempts: number) {
     const attempts = Math.max(1, Math.floor(maxAttempts));
     for (let i = 0; i < attempts; i++) {
@@ -242,7 +255,7 @@
       }
 
       try {
-        const updates = await invoke<WorkerProgressUpdate[]>('engine_progress');
+        const updates = await invokeWithTimeout<WorkerProgressUpdate[]>('engine_progress', 2000);
         for (const u of updates) {
           patchWorker(u.worker_idx, {
             iters_done: u.iters_done,

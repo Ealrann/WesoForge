@@ -159,42 +159,46 @@ async fn start_client(
                     };
                 }
                 EngineEvent::WorkerJobStarted { worker_idx, job } => {
-                    let mut progress = state_for_task.progress.lock().await;
-                    while progress.len() <= *worker_idx {
-                        let idx = progress.len();
-                        progress.push(WorkerProgressUpdate {
-                            worker_idx: idx,
+                    {
+                        let mut progress = state_for_task.progress.lock().await;
+                        while progress.len() <= *worker_idx {
+                            let idx = progress.len();
+                            progress.push(WorkerProgressUpdate {
+                                worker_idx: idx,
+                                iters_done: 0,
+                                iters_total: 0,
+                                iters_per_sec: 0,
+                            });
+                        }
+                        progress[*worker_idx] = WorkerProgressUpdate {
+                            worker_idx: *worker_idx,
                             iters_done: 0,
-                            iters_total: 0,
+                            iters_total: job.number_of_iterations,
                             iters_per_sec: 0,
-                        });
+                        };
                     }
-                    progress[*worker_idx] = WorkerProgressUpdate {
-                        worker_idx: *worker_idx,
-                        iters_done: 0,
-                        iters_total: job.number_of_iterations,
-                        iters_per_sec: 0,
-                    };
                     let _ = app.emit("engine-event", ev);
                 }
                 EngineEvent::JobFinished { outcome } => {
                     let worker_idx = outcome.worker_idx;
-                    let mut progress = state_for_task.progress.lock().await;
-                    while progress.len() <= worker_idx {
-                        let idx = progress.len();
-                        progress.push(WorkerProgressUpdate {
-                            worker_idx: idx,
+                    {
+                        let mut progress = state_for_task.progress.lock().await;
+                        while progress.len() <= worker_idx {
+                            let idx = progress.len();
+                            progress.push(WorkerProgressUpdate {
+                                worker_idx: idx,
+                                iters_done: 0,
+                                iters_total: 0,
+                                iters_per_sec: 0,
+                            });
+                        }
+                        progress[worker_idx] = WorkerProgressUpdate {
+                            worker_idx,
                             iters_done: 0,
                             iters_total: 0,
                             iters_per_sec: 0,
-                        });
+                        };
                     }
-                    progress[worker_idx] = WorkerProgressUpdate {
-                        worker_idx,
-                        iters_done: 0,
-                        iters_total: 0,
-                        iters_per_sec: 0,
-                    };
                     let _ = app.emit("engine-event", ev);
                 }
                 EngineEvent::Error { message } => {
