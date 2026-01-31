@@ -7,7 +7,42 @@ WesoForge is a client for **bluebox compaction**. It leases compaction work from
 Under the hood it relies on a slightly modified `chiavdf` to improve parallelism for bluebox compaction:
 https://github.com/Ealrann/chiavdf
 
+## CLI options (Linux)
+
+See `--help` for the full list. Common options:
+
+- `-p, --parallel <N>` (env `BBR_PARALLEL_PROOFS`, default = logical CPU count, range = 1..512)
+- `--no-tui` (env `BBR_NO_TUI=1`) for plain logs (recommended for large `--parallel` values)
+- `-m, --mem <BUDGET>` (env `BBR_MEM_BUDGET`, default = `128MB`)
+
 ## Build (from source)
+
+### Linux (CLI, release)
+
+Builds the production client (default backend = `https://weso.forgeros.fr/`) and writes a versioned artifact under `dist/`:
+
+```bash
+./build-cli.sh
+```
+
+### Linux (GUI AppImage, release)
+
+Builds the AppImage and writes a versioned artifact under `dist/`:
+
+```bash
+./build-gui.sh
+```
+
+Support build (release, but with devtools enabled):
+
+```bash
+SUPPORT_DEVTOOLS=1 ./build-gui.sh
+```
+
+Notes:
+- Requires `pnpm` (for the Svelte frontend).
+- Requires the Tauri CLI (`cargo tauri`) to be installed (e.g. `cargo install tauri-cli`).
+- Building the GUI needs the usual Tauri/Linux build deps (GTK/WebKitGTK development packages); package names vary per distro.
 
 ### Windows (CLI)
 
@@ -59,33 +94,6 @@ powershell -ExecutionPolicy Bypass -File .\\build-gui.ps1
 
 The artifact is written under `dist/WesoForge-gui_Windows_<version>_<arch>.zip`.
 
-### CLI (release)
-
-Builds the production client (default backend = `https://weso.forgeros.fr/`) and writes a versioned artifact under `dist/`:
-
-```bash
-./build-cli.sh
-```
-
-### GUI AppImage (release, Linux)
-
-Builds the AppImage and writes a versioned artifact under `dist/`:
-
-```bash
-./build-gui.sh
-```
-
-Support build (release, but with devtools enabled):
-
-```bash
-SUPPORT_DEVTOOLS=1 ./build-gui.sh
-```
-
-Notes:
-- Requires `pnpm` (for the Svelte frontend).
-- Requires the Tauri CLI (`cargo tauri`) to be installed (e.g. `cargo install tauri-cli`).
-- Building the GUI needs the usual Tauri/Linux build deps (GTK/WebKitGTK development packages); package names vary per distro.
-
 ## Run
 
 ### GUI
@@ -102,16 +110,8 @@ Notes:
 ### CLI
 
 ```bash
-./dist/WesoForge-cli_<version>_<arch>
+./dist/WesoForge-cli_Linux_<version>_<arch>
 ```
-
-## CLI options
-
-See `--help` for the full list. Common options:
-
-- `--backend-url <URL>` (env `BBR_BACKEND_URL`)
-- `-p, --parallel <N>` (env `BBR_PARALLEL_PROOFS`, default = logical CPU count)
-- `--no-tui` (env `BBR_NO_TUI=1`) for plain logs (recommended for large `--parallel` values)
 
 ## Linux runtime notes
 
