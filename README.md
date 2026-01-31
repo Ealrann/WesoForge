@@ -15,6 +15,11 @@ See `--help` for the full list. Common options:
 - `--no-tui` (env `BBR_NO_TUI=1`) for plain logs (recommended for large `--parallel` values)
 - `-m, --mem <BUDGET>` (env `BBR_MEM_BUDGET`, default = `128MB`)
 
+## Linux runtime notes
+
+- The CLI binary is dynamically linked (you may need GMP + C++ runtime depending on your distro).
+- The GUI uses the system WebView on Linux (WebKitGTK); depending on distro/version you may need to install the corresponding runtime packages.
+
 ## Build (from source)
 
 ### Linux (CLI, release)
@@ -112,11 +117,6 @@ The artifact is written under `dist/WesoForge-gui_Windows_<version>_<arch>.zip`.
 ```bash
 ./dist/WesoForge-cli_Linux_<version>_<arch>
 ```
-
-## Linux runtime notes
-
-- The CLI binary is dynamically linked (you may need GMP + C++ runtime depending on your distro).
-- The GUI uses the system WebView on Linux (WebKitGTK); depending on distro/version you may need to install the corresponding runtime packages.
 
 ## Development (local backend)
 
