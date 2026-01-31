@@ -5,10 +5,11 @@
   import PopupFrame from './components/PopupFrame.svelte';
   import pkg from '../package.json';
 
-  type SubmitterConfig = { reward_address?: string | null; name?: string | null };
-  type StartOptions = { parallel?: number | null };
+	  type SubmitterConfig = { reward_address?: string | null; name?: string | null };
+	  type StartOptions = { parallel?: number | null };
 
-  const appVersion = pkg.version;
+	  const appVersion = pkg.version;
+	  const PARALLEL_STORAGE_KEY = 'bbr_parallel_workers';
 
   type WorkerStage = 'Idle' | 'Computing' | 'Submitting';
 
@@ -66,7 +67,7 @@
   let cfgLoaded = $state(false);
   let savingCfg = $state(false);
   let cfgError = $state<string | null>(null);
-  let submitterOpen = $state(true);
+	  let submitterOpen = $state(false);
   let draftCfg = $state<SubmitterConfig>({});
   let logsOpen = $state(false);
 
@@ -79,15 +80,51 @@
   let recentJobs = $state<JobOutcome[]>([]);
   let logs = $state<LogEntry[]>([]);
 
-  let globalItersPerSec = $state<number>(0);
-  let busyWorkers = $state<number>(0);
+	  let globalItersPerSec = $state<number>(0);
+	  let busyWorkers = $state<number>(0);
 
-  const fmtInt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+	  const fmtInt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
-  function applyTheme(next: 'dark' | 'light') {
-    theme = next;
-    if (typeof document !== 'undefined') {
-      document.documentElement.dataset.theme = next;
+	  function normalizeParallel(value: number) {
+	    if (!Number.isFinite(value)) {
+	      return 1;
+	    }
+	    return Math.min(512, Math.max(1, Math.floor(value)));
+	  }
+
+	  function commitParallel() {
+	    parallel = normalizeParallel(parallel);
+	    try {
+	      localStorage.setItem(PARALLEL_STORAGE_KEY, String(parallel));
+	    } catch {
+	      // ignore
+	    }
+	  }
+
+	  function loadParallel() {
+	    try {
+	      const stored = localStorage.getItem(PARALLEL_STORAGE_KEY);
+	      if (stored != null) {
+	        const parsed = Number.parseInt(stored, 10);
+	        if (Number.isFinite(parsed)) {
+	          return normalizeParallel(parsed);
+	        }
+	      }
+	    } catch {
+	      // ignore
+	    }
+
+	    const hc = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined;
+	    if (typeof hc === 'number' && Number.isFinite(hc) && hc > 0) {
+	      return normalizeParallel(hc);
+	    }
+	    return 1;
+	  }
+
+	  function applyTheme(next: 'dark' | 'light') {
+	    theme = next;
+	    if (typeof document !== 'undefined') {
+	      document.documentElement.dataset.theme = next;
     }
     try {
       localStorage.setItem('bbr_theme', next);
@@ -100,11 +137,11 @@
     applyTheme(theme === 'dark' ? 'light' : 'dark');
   }
 
-  function openSubmitter() {
-    cfgError = null;
-    draftCfg = { ...cfg };
-    submitterOpen = true;
-  }
+	  function openSubmitter() {
+	    cfgError = null;
+	    draftCfg = { ...cfg };
+	    submitterOpen = true;
+	  }
 
   function closeSubmitter() {
     submitterOpen = false;
@@ -358,18 +395,24 @@
     return { label: 'Rejected', cls: 'border-muted/40 bg-bg text-muted' };
   }
 
-  async function loadCfg() {
-    cfgError = null;
-    try {
-      const res = await invoke<SubmitterConfig | null>('get_submitter_config');
-      cfg = res ?? {};
-      draftCfg = { ...cfg };
-    } catch (e) {
-      cfgError = String(e);
-    } finally {
-      cfgLoaded = true;
-    }
-  }
+	  async function loadCfg() {
+	    cfgError = null;
+	    try {
+	      const res = await invoke<SubmitterConfig | null>('get_submitter_config');
+	      cfg = res ?? {};
+	      draftCfg = { ...cfg };
+	    } catch (e) {
+	      cfgError = String(e);
+	    } finally {
+	      cfgLoaded = true;
+	    }
+	  }
+
+	  function isSubmitterConfigured(config: SubmitterConfig) {
+	    const payout = (config.reward_address ?? '').trim();
+	    const name = (config.name ?? '').trim();
+	    return payout.length > 0 && name.length > 0;
+	  }
 
   async function saveSubmitter() {
     savingCfg = true;
@@ -385,15 +428,16 @@
     }
   }
 
-  async function start() {
-    runError = null;
-    try {
-      const opts: StartOptions = {
-        parallel: parallel > 0 ? parallel : null
-      };
-      await invoke<void>('start_client', { opts });
-      running = true;
-      stopRequested = false;
+	  async function start() {
+	    runError = null;
+	    try {
+	      commitParallel();
+	      const opts: StartOptions = {
+	        parallel
+	      };
+	      await invoke<void>('start_client', { opts });
+	      running = true;
+	      stopRequested = false;
       void refreshSnapshotSoon(10);
     } catch (e) {
       runError = String(e);
@@ -437,16 +481,20 @@
     } catch {
       // ignore
     }
-    if (saved === 'light' || saved === 'dark') {
-      applyTheme(saved);
-    } else {
-      applyTheme('dark');
-    }
+	    if (saved === 'light' || saved === 'dark') {
+	      applyTheme(saved);
+	    } else {
+	      applyTheme('dark');
+	    }
 
-    await loadCfg();
-    await refreshSnapshot();
-  });
-</script>
+	    parallel = loadParallel();
+	    commitParallel();
+
+	    await loadCfg();
+	    submitterOpen = !isSubmitterConfigured(cfg);
+	    await refreshSnapshot();
+	  });
+	</script>
 
 <div class="h-screen bg-bg text-fg flex flex-col overflow-hidden">
   <header class="border-b border-border bg-header text-on-header">
@@ -529,22 +577,24 @@
 	      <div class="rounded border border-danger bg-danger/10 px-4 py-3 text-sm text-danger">{runError}</div>
 	    {/if}
 
-		    <div class="grid flex-1 min-h-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:grid-rows-[auto_1fr]">
+			    <div class="grid flex-1 min-h-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[auto_1fr]">
 	    <section class="rounded border border-border bg-surface p-4 lg:col-start-1 lg:col-span-1 lg:row-start-1 flex flex-col">
 		      <h2 class="text-sm font-semibold">Configuration</h2>
 
 		      <div class="mt-4 grid grid-cols-1 gap-3">
 		        <label class="flex items-center justify-between gap-4 text-sm">
 		          <span class="text-muted">Parallel workers</span>
-		          <input
-		            class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-		            type="number"
-		            min="1"
-		            step="1"
-		            bind:value={parallel}
-		          />
-		        </label>
-		      </div>
+			          <input
+			            class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+			            type="number"
+			            min="1"
+			            max="512"
+			            step="1"
+			            bind:value={parallel}
+			            onchange={commitParallel}
+			          />
+			        </label>
+			      </div>
 
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
             <div class="grid gap-1">
@@ -607,13 +657,13 @@
         {:else if workers.length === 0}
           <p class="text-sm text-muted">Waiting for workers…</p>
         {:else}
-          <div class="flex flex-wrap gap-4">
-            {#each workers as w (w.worker_idx)}
-              <div class="w-full rounded border border-border bg-bg p-4 sm:w-[275px]">
-                <div class="flex items-center justify-between">
-                  <div class="text-sm font-semibold">Worker {w.worker_idx + 1}</div>
-                  <span class={`rounded border px-2 py-1 text-xs ${stageBadgeClass(w.stage)}`}>{w.stage}</span>
-                </div>
+	          <div class="flex flex-wrap gap-3">
+	            {#each workers as w (w.worker_idx)}
+	              <div class="w-full rounded border border-border bg-bg p-2 sm:w-[260px]">
+	                <div class="flex items-center justify-between">
+	                  <div class="text-sm font-semibold">Worker {w.worker_idx + 1}</div>
+	                  <span class={`rounded border px-2 py-1 text-xs ${stageBadgeClass(w.stage)}`}>{w.stage}</span>
+	                </div>
 
                 {#if w.job}
                   <div class="mt-2 text-xs text-muted">
@@ -700,20 +750,20 @@
             <p class="text-sm text-muted">Loading…</p>
           {:else}
             <div class="grid grid-cols-1 gap-3">
-              <label class="grid gap-1 text-sm">
-                <span class="text-muted">Reward address (xch…)</span>
-                <input
-                  class="w-full rounded border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-muted/70 focus:border-accent focus:outline-none"
-                  placeholder="xch…"
-                  bind:value={draftCfg.reward_address}
-                />
-              </label>
-              <label class="grid gap-1 text-sm">
-                <span class="text-muted">Name</span>
-                <input
-                  class="w-full rounded border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-muted/70 focus:border-accent focus:outline-none"
-                  placeholder="Optional"
-                  bind:value={draftCfg.name}
+	              <label class="grid gap-1 text-sm">
+	                <span class="text-muted">Payout address</span>
+	                <input
+	                  class="w-full rounded border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-muted/70 focus:border-accent focus:outline-none"
+	                  placeholder="xch… (optional)"
+	                  bind:value={draftCfg.reward_address}
+	                />
+	              </label>
+	              <label class="grid gap-1 text-sm">
+	                <span class="text-muted">Name (for the leaderboard)</span>
+	                <input
+	                  class="w-full rounded border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-muted/70 focus:border-accent focus:outline-none"
+	                  placeholder="Optional"
+	                  bind:value={draftCfg.name}
                 />
               </label>
             </div>

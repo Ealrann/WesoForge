@@ -69,14 +69,15 @@ async fn main() -> anyhow::Result<()> {
     if cli.parallel == 0 {
         anyhow::bail!("--parallel must be >= 1");
     }
+    let parallel = cli.parallel as usize;
 
     let tui_enabled = !cli.no_tui && std::io::stdout().is_terminal();
-    let warn_tui_too_many_workers = tui_enabled && cli.parallel > 32;
+    let warn_tui_too_many_workers = tui_enabled && parallel > 32;
     let progress_steps = if tui_enabled { PROGRESS_BAR_STEPS } else { 0 };
 
     let engine = start_engine(EngineConfig {
         backend_url: cli.backend_url.clone(),
-        parallel: cli.parallel,
+        parallel,
         mem_budget_bytes: cli.mem_budget_bytes,
         submitter,
         idle_sleep: Duration::ZERO,
@@ -98,9 +99,9 @@ async fn main() -> anyhow::Result<()> {
         spawn_ctrl_c_handler(shutdown.clone(), shutdown_tx);
     }
 
-    let startup = format!("wesoforge {} parallel={}", env!("CARGO_PKG_VERSION"), cli.parallel);
+    let startup = format!("wesoforge {} parallel={}", env!("CARGO_PKG_VERSION"), parallel);
 
-    let mut ui = if tui_enabled { Some(Ui::new(cli.parallel)) } else { None };
+    let mut ui = if tui_enabled { Some(Ui::new(parallel)) } else { None };
     if let Some(ui) = &ui {
         ui.println(&startup);
     } else {
@@ -109,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
     if warn_tui_too_many_workers {
         let msg = format!(
             "warning: --parallel={} is high; TUI rendering is not optimized for this many progress bars. Consider running with --no-tui.",
-            cli.parallel
+            parallel
         );
         if let Some(ui) = &ui {
             ui.println(&msg);
@@ -118,8 +119,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let mut worker_busy = vec![false; cli.parallel];
-    let mut worker_speed: Vec<u64> = vec![0; cli.parallel];
+    let mut worker_busy = vec![false; parallel];
+    let mut worker_speed: Vec<u64> = vec![0; parallel];
 
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -154,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(ui) = &ui {
                     let busy = worker_busy.iter().filter(|v| **v).count();
                     let speed: u64 = worker_speed.iter().sum();
-                    ui.tick_global(speed, busy, cli.parallel);
+                    ui.tick_global(speed, busy, parallel);
                 }
             }
             evt = events.recv() => {

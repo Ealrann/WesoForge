@@ -93,11 +93,11 @@ async fn start_client(
         Err(err) => return Err(format!("{err:#}")),
     };
 
-    let parallel = opts
-        .parallel
-        .filter(|v| *v > 0)
-        .map(|v| v as usize)
-        .unwrap_or(4);
+    let parallel = opts.parallel.unwrap_or(4);
+    if !(1..=512).contains(&parallel) {
+        return Err("Parallel workers must be between 1 and 512.".to_string());
+    }
+    let parallel = parallel as usize;
 
     let engine = start_engine(EngineConfig {
         backend_url: default_backend_url(),

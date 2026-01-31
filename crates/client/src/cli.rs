@@ -11,10 +11,11 @@ fn default_backend_url() -> Url {
     Url::parse(DEFAULT_BACKEND_URL).expect("DEFAULT_BACKEND_URL must be a valid URL")
 }
 
-pub fn default_parallel_proofs() -> usize {
+pub fn default_parallel_proofs() -> u16 {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
+        .min(512) as u16
 }
 
 fn parse_mem_budget_bytes(input: &str) -> Result<u64, String> {
@@ -68,9 +69,10 @@ pub struct Cli {
         short = 'p',
         long,
         env = "BBR_PARALLEL_PROOFS",
-        default_value_t = default_parallel_proofs()
+        default_value_t = default_parallel_proofs(),
+        value_parser = clap::value_parser!(u16).range(1..=512)
     )]
-    pub parallel: usize,
+    pub parallel: u16,
 
     #[arg(long, env = "BBR_NO_TUI", default_value_t = false)]
     pub no_tui: bool,
