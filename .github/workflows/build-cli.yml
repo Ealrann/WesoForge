@@ -114,3 +114,11 @@ jobs:
           if ($output -notmatch "Usage") { throw "Expected -h output to contain 'Usage'" }
           if ($output -notmatch "compact proof worker") { throw "Expected -h output to contain 'compact proof worker'" }
           Write-Host "Help output assertions passed."
+
+      - name: Upload dist artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WesoForge-cli_${{ matrix.os }}_${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: warn
