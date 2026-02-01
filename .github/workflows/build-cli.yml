@@ -57,6 +57,10 @@ jobs:
         if: matrix.runner == 'macos-15-intel'
         run: brew install boost
 
+      - name: Patch chiavdf for GMP 6.3 (macOS Intel)
+        if: matrix.runner == 'macos-15-intel'
+        run: git -C chiavdf apply "$GITHUB_WORKSPACE/patches/chiavdf-gmp63-mpz-macro.patch"
+
       - name: Prepare Windows (MPIR and LLVM)
         if: matrix.os == 'Windows'
         run: |

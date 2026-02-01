@@ -85,15 +85,21 @@ or set BBR_CHIAVDF_DIR to a chiavdf checkout.",
     // Pass include path via CXXFLAGS so the compiler can find <gmpxx.h> and <gmp.h>.
     let (gmp_cflags, gmp_link_search) = detect_gmp_paths();
     let mut make_env: Vec<(String, String)> = Vec::new();
-    if let Some(ref cflags) = gmp_cflags {
-        if let Ok(ref existing) = env::var("CXXFLAGS") {
-            make_env.push((
-                "CXXFLAGS".to_string(),
-                format!("{cflags} {existing}"),
-            ));
-        } else {
-            make_env.push(("CXXFLAGS".to_string(), cflags.clone()));
+    let mut cxxflags = gmp_cflags.clone().unwrap_or_default();
+    if let Some(ref boost) = detect_boost_include() {
+        if !cxxflags.is_empty() {
+            cxxflags.push(' ');
         }
+        cxxflags.push_str(boost);
+    }
+    if let Ok(ref existing) = env::var("CXXFLAGS") {
+        if !cxxflags.is_empty() {
+            cxxflags.push(' ');
+        }
+        cxxflags.push_str(existing);
+    }
+    if !cxxflags.is_empty() {
+        make_env.push(("CXXFLAGS".to_string(), cxxflags));
     }
 
     let mut make_cmd = Command::new("make");
@@ -292,4 +298,25 @@ fn detect_gmp_paths() -> (Option<String>, Option<PathBuf>) {
     }
 
     (None, None)
+}
+
+/// Boost include path on macOS (Homebrew). Full chiavdf build needs <boost/asio.hpp>.
+fn detect_boost_include() -> Option<String> {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+        return None;
+    }
+    if let Ok(output) = Command::new("brew").args(["--prefix", "boost"]).output() {
+        if output.status.success() {
+            let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !prefix.is_empty() && PathBuf::from(&prefix).join("include").join("boost").join("asio.hpp").exists() {
+                return Some(format!("-I{}/include", prefix));
+            }
+        }
+    }
+    for prefix in ["/opt/homebrew", "/usr/local"] {
+        if PathBuf::from(prefix).join("include").join("boost").join("asio.hpp").exists() {
+            return Some(format!("-I{}/include", prefix));
+        }
+    }
+    None
 }
