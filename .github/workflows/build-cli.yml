@@ -48,14 +48,6 @@ jobs:
         with:
           node-version: 'lts/*'
 
-      - name: Install pnpm and Tauri CLI (Linux / macOS / Windows)
-        if: matrix.os == 'Linux' || matrix.os == 'macOS' || matrix.os == 'Windows'
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
-          cargo install tauri-cli
-        shell: bash
-
       - name: Prepare Linux
         if: matrix.os == 'Linux'
         run: |
@@ -87,6 +79,14 @@ jobs:
         run: |
           echo "$env:ProgramFiles\LLVM\bin" | Out-File -Append -FilePath $env:GITHUB_PATH
           echo "PATH=$env:ProgramFiles\LLVM\bin;$env:PATH" >> $env:GITHUB_ENV
+
+      - name: Install pnpm and Tauri CLI, then build Rust (CLI + GUI once)
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          cargo install tauri-cli
+          cargo build --release -p bbr-client -p bbr-client-gui --features prod-backend
 
       - name: Build CLI (Linux / macOS)
         if: matrix.os != 'Windows'
@@ -137,6 +137,9 @@ jobs:
 
       - name: Build GUI (Linux)
         if: matrix.os == 'Linux'
+        env:
+          # CI has no FUSE; linuxdeploy is an AppImage — extract and run instead
+          APPIMAGE_EXTRACT_AND_RUN: 1
         run: ./build-gui.sh
 
       - name: Build GUI (macOS)
