@@ -13,9 +13,10 @@ workspace_version() {
   awk '
     /^\[workspace\.package\]/ { in_pkg = 1; next }
     in_pkg && /^\[/ { in_pkg = 0 }
-    in_pkg {
-      if (match($0, /^version[[:space:]]*=[[:space:]]*"([^"]+)"/, m)) {
-        print m[1];
+    in_pkg && match($0, /^version[[:space:]]*=[[:space:]]*"/) {
+      rest = substr($0, RSTART + RLENGTH)
+      if (match(rest, /[^"]*/)) {
+        print substr(rest, RSTART, RLENGTH)
         exit
       }
     }

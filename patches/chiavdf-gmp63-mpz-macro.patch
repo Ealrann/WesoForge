@@ -1,0 +1,57 @@
+--- a/src/threading.h
++++ b/src/threading.h
+@@ -458,41 +458,41 @@
+     bool operator!=(const mpz_struct* t) const { return mpz_cmp(*this, t)!=0; }
+ 
+-    bool operator<(int64 i) const { return mpz_cmp_si(*this, i)<0; }
+-    bool operator<=(int64 i) const { return mpz_cmp_si(*this, i)<=0; }
+-    bool operator==(int64 i) const { return mpz_cmp_si(*this, i)==0; }
+-    bool operator>=(int64 i) const { return mpz_cmp_si(*this, i)>=0; }
+-    bool operator>(int64 i) const { return mpz_cmp_si(*this, i)>0; }
+-    bool operator!=(int64 i) const { return mpz_cmp_si(*this, i)!=0; }
++    bool operator<(int64 i) const { return mpz_cmp_si(_(), i)<0; }
++    bool operator<=(int64 i) const { return mpz_cmp_si(_(), i)<=0; }
++    bool operator==(int64 i) const { return mpz_cmp_si(_(), i)==0; }
++    bool operator>=(int64 i) const { return mpz_cmp_si(_(), i)>=0; }
++    bool operator>(int64 i) const { return mpz_cmp_si(_(), i)>0; }
++    bool operator!=(int64 i) const { return mpz_cmp_si(_(), i)!=0; }
+ 
+     bool operator<(uint64 i) const { return mpz_cmp_ui(_(), i)<0; }
+     bool operator<=(uint64 i) const { return mpz_cmp_ui(_(), i)<=0; }
+     bool operator==(uint64 i) const { return mpz_cmp_ui(_(), i)==0; }
+     bool operator>=(uint64 i) const { return mpz_cmp_ui(_(), i)>=0; }
+     bool operator>(uint64 i) const { return mpz_cmp_ui(_(), i)>0; }
+     bool operator!=(uint64 i) const { return mpz_cmp_ui(_(), i)!=0; }
+ 
+     int compare_abs(const mpz_struct* t) const {
+-        return mpz_cmpabs(*this, t);
++        return mpz_cmpabs(_(), t);
+     }
+ 
+     int compare_abs(uint64 t) const {
+-        return mpz_cmpabs_ui(*this, t);
++        return mpz_cmpabs_ui(_(), t);
+     }
+ 
+     //returns 0 if *this==0
+     int sgn() const {
+         return mpz_sgn(_());
+     }
+ 
+     int num_bits() const {
+-        return mpz_sizeinbase(*this, 2);
++        return mpz_sizeinbase(_(), 2);
+     }
+ 
+     //0 if this is 0
+     int num_limbs() const {
+-        return mpz_size(*this);
++        return mpz_size(_());
+     }
+ 
+     const uint64* read_limbs() const {
+-        return (uint64*)mpz_limbs_read(*this);
++        return (uint64*)mpz_limbs_read(_());
+     }
+ 
+     //limbs are uninitialized. call finish

@@ -1,0 +1,116 @@
+name: Build CLI and test -h
+
+on:
+  push:
+    branches:
+    - main
+  release:
+    types: [published]
+  pull_request:
+    branches:
+    - '**'
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: Linux
+            runner: ubuntu-latest
+            arch: x64
+          - os: macOS
+            runner: macos-latest
+            arch: ARM64
+          - os: macOS
+            runner: macos-15-intel
+            arch: x64
+          - os: Windows
+            runner: windows-latest
+            arch: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Prepare Linux
+        if: matrix.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl build-essential clang libgmp-dev libboost-all-dev gawk pkg-config
+
+      - name: Prepare macOS
+        if: matrix.os == 'macOS'
+        run: |
+          brew install pkg-config gmp
+
+      - name: Prepare macOS Intel (Boost)
+        if: matrix.runner == 'macos-15-intel'
+        run: brew install boost
+
+      - name: Patch chiavdf for GMP 6.3 (macOS Intel)
+        if: matrix.runner == 'macos-15-intel'
+        run: git -C chiavdf apply "$GITHUB_WORKSPACE/patches/chiavdf-gmp63-mpz-macro.patch"
+
+      - name: Prepare Windows (MPIR and LLVM)
+        if: matrix.os == 'Windows'
+        run: |
+          git clone https://github.com/Chia-Network/mpir_gc_x64.git chiavdf/mpir_gc_x64
+          winget install LLVM.LLVM --accept-package-agreements --accept-source-agreements --silent
+
+      - name: Set Windows PATH for LLVM
+        if: matrix.os == 'Windows'
+        run: |
+          echo "$env:ProgramFiles\LLVM\bin" | Out-File -Append -FilePath $env:GITHUB_PATH
+          echo "PATH=$env:ProgramFiles\LLVM\bin;$env:PATH" >> $env:GITHUB_ENV
+
+      - name: Build CLI (Linux / macOS)
+        if: matrix.os != 'Windows'
+        run: ./build-cli.sh
+
+      - name: Build CLI (Windows)
+        if: matrix.os == 'Windows'
+        shell: pwsh
+        run: ./build-cli.ps1
+
+      - name: Test -h output (Linux / macOS)
+        if: matrix.os != 'Windows'
+        run: |
+          BIN="target/release/wesoforge"
+          [ -f "$BIN" ] || { echo "Binary not found: $BIN"; exit 1; }
+          OUTPUT="$("$BIN" -h 2>&1)"
+          echo "$OUTPUT"
+          echo "---"
+          echo "$OUTPUT" | grep -q "WesoForge" || { echo "Expected -h output to contain 'WesoForge'"; exit 1; }
+          echo "$OUTPUT" | grep -q "Usage" || { echo "Expected -h output to contain 'Usage'"; exit 1; }
+          echo "$OUTPUT" | grep -q "compact proof worker" || { echo "Expected -h output to contain 'compact proof worker'"; exit 1; }
+          echo "Help output assertions passed."
+
+      - name: Test -h output (Windows)
+        if: matrix.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Run from dist/ where MPIR DLLs are; target\release\wesoforge.exe would fail to load without them
+          $distExe = Get-ChildItem -Path dist -Filter "WesoForge-cli_*.exe" | Select-Object -First 1
+          if (-not $distExe) { throw "Binary not found in dist/" }
+          $bin = $distExe.FullName
+          # Clap prints -h to stderr; capture both streams so we get the full help text
+          $outFile = "help-stdout.txt"
+          $errFile = "help-stderr.txt"
+          $null = Start-Process -FilePath $bin -ArgumentList "-h" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile -WorkingDirectory (Split-Path $bin)
+          $output = (Get-Content $outFile -Raw) + (Get-Content $errFile -Raw)
+          Write-Host $output
+          Write-Host "---"
+          if ($output -notmatch "WesoForge") { throw "Expected -h output to contain 'WesoForge'" }
+          if ($output -notmatch "Usage") { throw "Expected -h output to contain 'Usage'" }
+          if ($output -notmatch "compact proof worker") { throw "Expected -h output to contain 'compact proof worker'" }
+          Write-Host "Help output assertions passed."
