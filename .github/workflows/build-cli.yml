@@ -84,6 +84,12 @@ jobs:
           echo "LINUXDEPLOY=$LINUXDEPLOY_DIR/bin/AppRun" >> "$GITHUB_ENV"
           echo "$LINUXDEPLOY_DIR/bin" >> "$GITHUB_PATH"
 
+      - name: Verify extracted linuxdeploy (Linux)
+        if: matrix.os == 'Linux'
+        run: |
+          "$LINUXDEPLOY" --help || true
+          ls -la "$(dirname "$LINUXDEPLOY")"
+
       - name: Prepare macOS
         if: matrix.os == 'macOS'
         run: |
@@ -126,9 +132,13 @@ jobs:
               export PATH="${RUNNER_TEMP:-/tmp}/linuxdeploy/bin:$PATH"
               export APPIMAGE_EXTRACT_AND_RUN=1
               export TMPDIR="${RUNNER_TEMP:-/tmp}"
-              (cd crates/client-gui && export NO_STRIP=1 && cargo tauri build --features prod-backend --bundles appimage)
+              # Empty cache so bundler uses LINUXDEPLOY instead of cached AppImage
+              export XDG_CACHE_HOME="${RUNNER_TEMP:-/tmp}/tauri-cache-empty"
+              mkdir -p "$XDG_CACHE_HOME"
+              (cd crates/client-gui && export NO_STRIP=1 && cargo tauri build -vv --features prod-backend --bundles appimage)
               ;;
             Darwin) (cd crates/client-gui && cargo tauri build --features prod-backend --bundles dmg) ;;
+            *) (cd crates/client-gui && cargo tauri build --features prod-backend) ;;
           esac
 
       - name: Package CLI (Linux / macOS)
