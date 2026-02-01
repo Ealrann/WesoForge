@@ -118,16 +118,13 @@ jobs:
       - name: Determine version (Linux / macOS)
         if: matrix.os != 'Windows'
         run: |
-          VERSION="$(awk '
-            /^\[workspace\.package\]/ { in_pkg = 1; next }
-            in_pkg && /^\[/ { in_pkg = 0 }
-            in_pkg {
-              if (match($0, /^version[[:space:]]*=[[:space:]]*"([^"]+)"/, m)) {
-                print m[1];
-                exit
-              }
-            }
-          ' Cargo.toml)"
+          VERSION="$(python3 - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as f:
+            cargo = tomllib.load(f)
+          print(cargo["workspace"]["package"]["version"])
+          PY
+          )"
           if [ -z "${VERSION:-}" ]; then
             echo "Failed to determine version from Cargo.toml" >&2
             exit 1
