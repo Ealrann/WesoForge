@@ -88,12 +88,14 @@ jobs:
         if: matrix.os == 'Windows'
         shell: pwsh
         run: |
-          $bin = "target\release\wesoforge.exe"
-          if (-not (Test-Path $bin)) { throw "Binary not found: $bin" }
+          # Run from dist/ where MPIR DLLs are; target\release\wesoforge.exe would fail to load without them
+          $distExe = Get-ChildItem -Path dist -Filter "WesoForge-cli_*.exe" | Select-Object -First 1
+          if (-not $distExe) { throw "Binary not found in dist/" }
+          $bin = $distExe.FullName
           # Clap prints -h to stderr; capture both streams so we get the full help text
           $outFile = "help-stdout.txt"
           $errFile = "help-stderr.txt"
-          $p = Start-Process -FilePath $bin -ArgumentList "-h" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+          $null = Start-Process -FilePath $bin -ArgumentList "-h" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile -WorkingDirectory (Split-Path $bin)
           $output = (Get-Content $outFile -Raw) + (Get-Content $errFile -Raw)
           Write-Host $output
           Write-Host "---"
