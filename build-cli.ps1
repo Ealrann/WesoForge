@@ -77,7 +77,7 @@ if (!(Test-Path -LiteralPath $BinSrc)) {
     throw "Expected binary not found at: $BinSrc"
 }
 
-$BinDst = Join-Path $DistDir ("WesoForge-cli_{0}_{1}.exe" -f $Version, $Arch)
+$BinDst = Join-Path $DistDir ("WesoForge-cli_Windows_{0}_{1}.exe" -f $Version, $Arch)
 Copy-Item -Force -LiteralPath $BinSrc -Destination $BinDst
 
 # MPIR runtime DLLs (required by chiavdf on Windows).

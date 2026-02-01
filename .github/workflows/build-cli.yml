@@ -20,16 +20,16 @@ jobs:
         include:
           - os: Linux
             runner: ubuntu-latest
-            arch: x64
+            arch: amd64
           - os: macOS
             runner: macos-latest
-            arch: ARM64
+            arch: arm64
           - os: macOS
             runner: macos-15-intel
-            arch: x64
+            arch: amd64
           - os: Windows
             runner: windows-latest
-            arch: x64
+            arch: amd64
 
     steps:
       - name: Checkout
@@ -115,10 +115,53 @@ jobs:
           if ($output -notmatch "compact proof worker") { throw "Expected -h output to contain 'compact proof worker'" }
           Write-Host "Help output assertions passed."
 
+      - name: Determine version (Linux / macOS)
+        if: matrix.os != 'Windows'
+        run: |
+          VERSION="$(awk '
+            /^\[workspace\.package\]/ { in_pkg = 1; next }
+            in_pkg && /^\[/ { in_pkg = 0 }
+            in_pkg {
+              if (match($0, /^version[[:space:]]*=[[:space:]]*"([^"]+)"/, m)) {
+                print m[1];
+                exit
+              }
+            }
+          ' Cargo.toml)"
+          if [ -z "${VERSION:-}" ]; then
+            echo "Failed to determine version from Cargo.toml" >&2
+            exit 1
+          fi
+          echo "WESOFORGE_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Determine version (Windows)
+        if: matrix.os == 'Windows'
+        shell: pwsh
+        run: |
+          $inPkg = $false
+          $version = $null
+          foreach ($line in Get-Content -LiteralPath "Cargo.toml") {
+            if ($line -match '^\[workspace\.package\]') {
+              $inPkg = $true
+              continue
+            }
+            if ($inPkg -and $line -match '^\[') {
+              $inPkg = $false
+            }
+            if ($inPkg -and $line -match '^version\s*=\s*"([^"]+)"') {
+              $version = $Matches[1]
+              break
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Failed to determine version from Cargo.toml"
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "WESOFORGE_VERSION=$version"
+
       - name: Upload dist artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: WesoForge-cli_${{ matrix.os }}_${{ matrix.arch }}
+          name: WesoForge-cli_${{ matrix.os }}_${{ env.WESOFORGE_VERSION }}_${{ matrix.arch }}
           path: dist/*
           if-no-files-found: warn

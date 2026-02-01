@@ -31,6 +31,16 @@ platform_arch() {
   esac
 }
 
+platform_os() {
+  local os
+  os="$(uname -s)"
+  case "$os" in
+    Linux) echo "Linux" ;;
+    Darwin) echo "macOS" ;;
+    *) echo "$os" ;;
+  esac
+}
+
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 mkdir -p "$TARGET_DIR"
 if ! : >"$TARGET_DIR/.wesoforge-write-test" 2>/dev/null; then
@@ -57,9 +67,10 @@ if [[ -z "${VERSION:-}" ]]; then
   exit 1
 fi
 ARCH="$(platform_arch)"
+OS="$(platform_os)"
 
 BIN_SRC="$TARGET_DIR/release/wesoforge"
-BIN_DST="$DIST_DIR/WesoForge-cli_Linux_${VERSION}_${ARCH}"
+BIN_DST="$DIST_DIR/WesoForge-cli_${OS}_${VERSION}_${ARCH}"
 
 if [[ ! -f "$BIN_SRC" ]]; then
   echo "error: expected binary not found at: $BIN_SRC" >&2
