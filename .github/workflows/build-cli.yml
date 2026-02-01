@@ -22,8 +22,11 @@ jobs:
             runner: ubuntu-latest
             arch: x64
           - os: macOS
-            runner: macos-14
+            runner: macos-latest
             arch: ARM64
+          - os: macOS
+            runner: macos-15-intel
+            arch: x64
           - os: Windows
             runner: windows-latest
             arch: x64
