@@ -14,9 +14,6 @@ jobs:
   build-and-test:
     name: ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    env:
-      # Linux: no FUSE in CI; AppImages (linuxdeploy) must extract and run
-      APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.os == 'Linux' && '1' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -62,27 +59,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git curl build-essential clang libgmp-dev libboost-all-dev gawk pkg-config
           sudo apt-get install -y pkg-config libgtk-3-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
-
-      - name: Extract linuxdeploy for CI (no FUSE)
-        if: matrix.os == 'Linux'
-        run: |
-          LINUXDEPLOY_DIR="$RUNNER_TEMP/linuxdeploy"
-          mkdir -p "$LINUXDEPLOY_DIR" && cd "$LINUXDEPLOY_DIR"
-          curl -sL -o linuxdeploy.AppImage "https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage"
-          chmod +x linuxdeploy.AppImage
-          ./linuxdeploy.AppImage --appimage-extract
-          mv squashfs-root bin
-          curl -sL -o plugin.AppImage "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage"
-          chmod +x plugin.AppImage
-          ./plugin.AppImage --appimage-extract
-          if [ -f squashfs-root/usr/bin/linuxdeploy-plugin-appimage ]; then
-            cp squashfs-root/usr/bin/linuxdeploy-plugin-appimage bin/
-          elif [ -f squashfs-root/AppRun ]; then
-            cp squashfs-root/AppRun bin/linuxdeploy-plugin-appimage
-          fi
-          chmod +x bin/linuxdeploy-plugin-appimage 2>/dev/null || true
-          echo "LINUXDEPLOY=$LINUXDEPLOY_DIR/bin/AppRun" >> "$GITHUB_ENV"
-          echo "$LINUXDEPLOY_DIR/bin" >> "$GITHUB_PATH"
+          sudo apt-get install -y fuse libfuse2
 
       - name: Prepare macOS
         if: matrix.os == 'macOS'
@@ -122,7 +99,7 @@ jobs:
           pnpm -C ui install
           cargo build --release -p bbr-client -p bbr-client-gui --features prod-backend
           case "$(uname -s)" in
-            Linux) (cd crates/client-gui && export NO_STRIP=1 && export APPIMAGE_EXTRACT_AND_RUN=1 && cargo tauri build --features prod-backend --bundles appimage) ;;
+            Linux) (cd crates/client-gui && cargo tauri build --features prod-backend --bundles appimage) ;;
             Darwin) (cd crates/client-gui && cargo tauri build --features prod-backend --bundles dmg) ;;
           esac
 
