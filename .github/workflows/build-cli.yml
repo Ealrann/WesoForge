@@ -193,24 +193,45 @@ jobs:
           if ($output -notmatch "compact proof worker") { throw "Expected -h output to contain 'compact proof worker'" }
           Write-Host "Help output assertions passed."
 
-      - name: Package GUI (Linux)
-        if: matrix.os == 'Linux'
-        env:
-          BBR_SKIP_CARGO_BUILD: 1
-        run: ./build-gui.sh
+      - name: Determine version (Linux / macOS)
+        if: matrix.os != 'Windows'
+        run: |
+          VERSION="$(python3 - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as f:
+            cargo = tomllib.load(f)
+          print(cargo["workspace"]["package"]["version"])
+          PY
+          )"
+          if [ -z "${VERSION:-}" ]; then
+            echo "Failed to determine version from Cargo.toml" >&2
+            exit 1
+          fi
+          echo "WESOFORGE_VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      - name: Package GUI (macOS)
-        if: matrix.os == 'macOS'
-        env:
-          BBR_SKIP_CARGO_BUILD: 1
-        run: ./build-gui.sh
-
-      - name: Package GUI (Windows)
+      - name: Determine version (Windows)
         if: matrix.os == 'Windows'
         shell: pwsh
-        env:
-          BBR_SKIP_CARGO_BUILD: 1
-        run: ./build-gui.ps1
+        run: |
+          $inPkg = $false
+          $version = $null
+          foreach ($line in Get-Content -LiteralPath "Cargo.toml") {
+            if ($line -match '^\[workspace\.package\]') {
+              $inPkg = $true
+              continue
+            }
+            if ($inPkg -and $line -match '^\[') {
+              $inPkg = $false
+            }
+            if ($inPkg -and $line -match '^version\s*=\s*"([^"]+)"') {
+              $version = $Matches[1]
+              break
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Failed to determine version from Cargo.toml"
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "WESOFORGE_VERSION=$version"
 
       - name: Upload dist artifacts
         if: always()
