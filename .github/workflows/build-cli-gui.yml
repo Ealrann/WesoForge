@@ -1,4 +1,4 @@
-name: Build CLI and test -h
+name: Build CLI and GUI and test -h
 
 on:
   push:
@@ -17,6 +17,8 @@ jobs:
     env:
       # Linux: run AppImages without FUSE (extract and run) so downloaded linuxdeploy works in CI
       APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.os == 'Linux' && '1' || '' }}
+      # So Package CLI step finds the binary built in the previous step
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     strategy:
       fail-fast: false
       matrix:
@@ -130,35 +132,30 @@ jobs:
           }
           Add-Content -Path $env:GITHUB_ENV -Value "WESOFORGE_VERSION=$version"
 
-      - name: Install pnpm and Tauri CLI, then build Rust (CLI + GUI once)
+      - name: Install pnpm and Tauri CLI
         shell: bash
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: |
           corepack enable
           corepack prepare pnpm@latest --activate
           cargo install tauri-cli
           pnpm -C ui install
-          # Build CLI only here; GUI is built by cargo tauri build so its binary has __TAURI_BUNDLE_TYPE
-          cargo build --release -p bbr-client --features prod-backend
-          case "$(uname -s)" in
-            Linux) (cd crates/client-gui && export NO_STRIP=1 && cargo tauri build --features prod-backend --bundles appimage) ;;
-            Darwin) (cd crates/client-gui && cargo tauri build --features prod-backend --bundles dmg) ;;
-            *) (cd crates/client-gui && cargo tauri build --features prod-backend) ;;
-          esac
 
-      - name: Package CLI (Linux / macOS)
+      - name: Build CLI then GUI (Linux / macOS)
         if: matrix.os != 'Windows'
         env:
-          BBR_SKIP_CARGO_BUILD: 1
-        run: ./build-cli.sh
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          ./build-cli.sh
+          ./build-gui.sh
 
-      - name: Package CLI (Windows)
+      - name: Build CLI then GUI (Windows)
         if: matrix.os == 'Windows'
         shell: pwsh
         env:
-          BBR_SKIP_CARGO_BUILD: 1
-        run: ./build-cli.ps1
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          ./build-cli.ps1
+          ./build-gui.ps1
 
       - name: Test -h output (Linux / macOS)
         if: matrix.os != 'Windows'
@@ -193,50 +190,26 @@ jobs:
           if ($output -notmatch "compact proof worker") { throw "Expected -h output to contain 'compact proof worker'" }
           Write-Host "Help output assertions passed."
 
-      - name: Determine version (Linux / macOS)
-        if: matrix.os != 'Windows'
+      - name: Prepare CLI and GUI artifact dirs
+        shell: bash
         run: |
-          VERSION="$(python3 - <<'PY'
-          import tomllib
-          with open("Cargo.toml", "rb") as f:
-            cargo = tomllib.load(f)
-          print(cargo["workspace"]["package"]["version"])
-          PY
-          )"
-          if [ -z "${VERSION:-}" ]; then
-            echo "Failed to determine version from Cargo.toml" >&2
-            exit 1
-          fi
-          echo "WESOFORGE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p dist-cli dist-gui
+          # CLI: binary (and on Windows, MPIR DLLs)
+          cp -f dist/WesoForge-cli_* dist-cli/ 2>/dev/null || true
+          cp -f dist/mpir*.dll dist-cli/ 2>/dev/null || true
+          # GUI: bundle(s)
+          cp -f dist/WesoForge-gui_* dist-gui/ 2>/dev/null || true
 
-      - name: Determine version (Windows)
-        if: matrix.os == 'Windows'
-        shell: pwsh
-        run: |
-          $inPkg = $false
-          $version = $null
-          foreach ($line in Get-Content -LiteralPath "Cargo.toml") {
-            if ($line -match '^\[workspace\.package\]') {
-              $inPkg = $true
-              continue
-            }
-            if ($inPkg -and $line -match '^\[') {
-              $inPkg = $false
-            }
-            if ($inPkg -and $line -match '^version\s*=\s*"([^"]+)"') {
-              $version = $Matches[1]
-              break
-            }
-          }
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "Failed to determine version from Cargo.toml"
-          }
-          Add-Content -Path $env:GITHUB_ENV -Value "WESOFORGE_VERSION=$version"
-
-      - name: Upload dist artifacts
-        if: always()
+      - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: WesoForge-cli_${{ matrix.os }}_${{ env.WESOFORGE_VERSION }}_${{ matrix.arch }}
-          path: dist/*
+          path: dist-cli/
+          if-no-files-found: warn
+
+      - name: Upload GUI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WesoForge-gui_${{ matrix.os }}_${{ env.WESOFORGE_VERSION }}_${{ matrix.arch }}
+          path: dist-gui/
           if-no-files-found: warn

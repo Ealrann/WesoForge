@@ -23,7 +23,8 @@
   },
   "bundle": {
     "icon": [
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.ico"
     ]
   }
 }
