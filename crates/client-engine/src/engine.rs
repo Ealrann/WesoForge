@@ -85,8 +85,7 @@ struct WorkerRuntime {
     job: Option<JobSummary>,
     group_id: Option<u64>,
     work: Option<WorkProgress>,
-    last_speed_sample_at: Option<Instant>,
-    prev_speed_interval: Option<(u64, Duration)>,
+    compute_started_at: Option<Instant>,
     speed_its_per_sec: u64,
     last_reported_squaring_iters_done: u64,
     last_reported_effective_iters_done: u64,
@@ -100,8 +99,7 @@ impl WorkerRuntime {
             job: None,
             group_id: None,
             work: None,
-            last_speed_sample_at: None,
-            prev_speed_interval: None,
+            compute_started_at: None,
             speed_its_per_sec: 0,
             last_reported_squaring_iters_done: 0,
             last_reported_effective_iters_done: 0,
@@ -124,8 +122,7 @@ impl WorkerRuntime {
         self.work = Some(WorkProgress::Single {
             total_iters: job.number_of_iterations,
         });
-        self.last_speed_sample_at = Some(Instant::now());
-        self.prev_speed_interval = None;
+        self.compute_started_at = Some(Instant::now());
         self.speed_its_per_sec = 0;
         self.last_reported_squaring_iters_done = 0;
         self.last_reported_effective_iters_done = 0;
@@ -137,8 +134,7 @@ impl WorkerRuntime {
         self.job = Some(display_job);
         self.group_id = Some(group_id);
         self.work = Some(WorkProgress::Group { per_job_iters });
-        self.last_speed_sample_at = Some(Instant::now());
-        self.prev_speed_interval = None;
+        self.compute_started_at = Some(Instant::now());
         self.speed_its_per_sec = 0;
         self.last_reported_squaring_iters_done = 0;
         self.last_reported_effective_iters_done = 0;
@@ -154,8 +150,7 @@ impl WorkerRuntime {
         self.job = None;
         self.group_id = None;
         self.work = None;
-        self.last_speed_sample_at = None;
-        self.prev_speed_interval = None;
+        self.compute_started_at = None;
         self.speed_its_per_sec = 0;
         self.last_reported_squaring_iters_done = 0;
         self.last_reported_effective_iters_done = 0;
@@ -182,22 +177,13 @@ impl WorkerRuntime {
             return None;
         }
 
-        if let Some(last_at) = self.last_speed_sample_at {
-            let dt = now.duration_since(last_at);
-            let (total_iters, total_dt) = if let Some((prev_iters, prev_dt)) = self.prev_speed_interval
-            {
-                (prev_iters.saturating_add(delta_effective), prev_dt + dt)
-            } else {
-                (delta_effective, dt)
-            };
-
-            if total_dt.as_secs_f64() > 0.0 {
-                self.speed_its_per_sec = (total_iters as f64 / total_dt.as_secs_f64()).round() as u64;
+        if let Some(started_at) = self.compute_started_at {
+            let elapsed = now.duration_since(started_at);
+            if elapsed.as_secs_f64() > 0.0 {
+                self.speed_its_per_sec =
+                    (effective_done as f64 / elapsed.as_secs_f64()).round() as u64;
             }
-            self.prev_speed_interval = Some((delta_effective, dt));
         }
-
-        self.last_speed_sample_at = Some(now);
         self.last_reported_squaring_iters_done = iters_done;
         self.last_reported_effective_iters_done = effective_done;
         if delta_squaring > 0 {
