@@ -13,5 +13,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
+bbr-client-affinity = { path = "../client-affinity" }
 bbr-client-chiavdf-fast = { path = "../chiavdf-fast" }
 bbr-client-core = { path = "../client-core" }

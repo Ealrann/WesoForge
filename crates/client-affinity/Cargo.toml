@@ -1,0 +1,8 @@
+[package]
+name = "bbr-client-affinity"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+libc = { workspace = true }
+

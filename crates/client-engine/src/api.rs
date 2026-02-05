@@ -6,6 +6,15 @@ use bbr_client_core::submitter::SubmitterConfig;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
+/// CPU pinning strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinMode {
+    /// Do not pin worker compute threads.
+    Off,
+    /// Pin worker compute threads to a shared-L3 (CCD/CCX) CPU set (Linux best-effort).
+    L3,
+}
+
 /// Configuration for the in-process engine.
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -51,6 +60,9 @@ pub struct EngineConfig {
 
     /// Maximum number of completed jobs retained in the snapshot.
     pub recent_jobs_max: usize,
+
+    /// CPU pinning strategy.
+    pub pin_mode: PinMode,
 }
 
 impl EngineConfig {

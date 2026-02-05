@@ -1,7 +1,7 @@
 use clap::{Parser, ValueEnum};
 use reqwest::Url;
 
-use bbr_client_engine::EngineConfig;
+use bbr_client_engine::{EngineConfig, PinMode};
 
 #[cfg(feature = "prod-backend")]
 const DEFAULT_BACKEND_URL: &str = "https://weso.forgeros.fr/";
@@ -68,6 +68,23 @@ pub enum WorkMode {
     Group,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PinArg {
+    /// Do not pin worker compute threads (default).
+    Off,
+    /// Pin worker compute threads to shared L3 cache CPU sets (Linux best-effort).
+    L3,
+}
+
+impl From<PinArg> for PinMode {
+    fn from(value: PinArg) -> Self {
+        match value {
+            PinArg::Off => PinMode::Off,
+            PinArg::L3 => PinMode::L3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 #[command(name = "wesoforge", version, about = "WesoForge compact proof worker")]
 pub struct Cli {
@@ -98,6 +115,10 @@ pub struct Cli {
 
     #[arg(long, env = "BBR_NO_TUI", default_value_t = false)]
     pub no_tui: bool,
+
+    /// CPU pinning strategy (Linux only; ignored on other platforms).
+    #[arg(long, env = "BBR_PIN", value_enum, default_value_t = PinArg::Off)]
+    pub pin: PinArg,
 
     /// Memory budget per worker for streaming proof generation (e.g. `128MB`).
     ///

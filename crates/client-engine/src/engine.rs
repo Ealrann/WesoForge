@@ -9,13 +9,14 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 
 use crate::api::{
-    EngineConfig, EngineEvent, EngineHandle, JobOutcome, JobSummary, StatusSnapshot,
+    EngineConfig, EngineEvent, EngineHandle, JobOutcome, JobSummary, PinMode, StatusSnapshot,
     WorkerSnapshot, WorkerStage,
 };
 use crate::backend::{
     BackendJobDto, BackendWorkBatch, BackendWorkGroup, fetch_group_work, fetch_work,
 };
 use crate::inflight::InflightStore;
+use crate::pinning::PinningPlan;
 use crate::worker::{WorkerCommand, WorkerInternalEvent};
 
 pub(crate) struct EngineInner {
@@ -171,8 +172,7 @@ impl WorkerRuntime {
         let effective_done = work.effective_iters_done(iters_done);
         let delta_effective =
             effective_done.saturating_sub(self.last_reported_effective_iters_done);
-        let delta_squaring =
-            iters_done.saturating_sub(self.last_reported_squaring_iters_done);
+        let delta_squaring = iters_done.saturating_sub(self.last_reported_squaring_iters_done);
         if delta_squaring == 0 && delta_effective == 0 {
             return None;
         }
@@ -228,7 +228,11 @@ impl EngineRuntime {
                     .get(idx)
                     .map(|a| a.load(std::sync::atomic::Ordering::Relaxed))
                     .unwrap_or(0),
-                iters_total: w.work.as_ref().map(|p| p.squaring_total_iters()).unwrap_or(0),
+                iters_total: w
+                    .work
+                    .as_ref()
+                    .map(|p| p.squaring_total_iters())
+                    .unwrap_or(0),
                 iters_per_sec: w.speed_its_per_sec,
             })
             .collect();
@@ -311,67 +315,65 @@ impl EngineRuntime {
             if !self.workers[idx].is_idle() {
                 continue;
             }
-            let Some(item) = self.pending.pop_front() else { break };
+            let Some(item) = self.pending.pop_front() else {
+                break;
+            };
 
             let (job_summary, cmd, group_info): (
                 JobSummary,
                 WorkerCommand,
                 Option<(u64, Vec<u64>)>,
-            ) =
-                match item {
-                    WorkItem::Job(item) => {
-                        let job_summary = JobSummary {
-                            job_id: item.job.job_id,
-                            group_proofs: None,
-                            height: item.job.height,
-                            field_vdf: item.job.field_vdf,
-                            number_of_iterations: item.job.number_of_iterations,
-                        };
+            ) = match item {
+                WorkItem::Job(item) => {
+                    let job_summary = JobSummary {
+                        job_id: item.job.job_id,
+                        group_proofs: None,
+                        height: item.job.height,
+                        field_vdf: item.job.field_vdf,
+                        number_of_iterations: item.job.number_of_iterations,
+                    };
 
-                        let cmd = WorkerCommand::Job {
-                            worker_idx: idx,
-                            backend_url: self.cfg.backend_url.clone(),
-                            lease_id: item.lease_id,
-                            lease_expires_at: item.lease_expires_at,
-                            job: item.job,
-                            progress_steps: self.cfg.progress_steps,
-                        };
+                    let cmd = WorkerCommand::Job {
+                        worker_idx: idx,
+                        backend_url: self.cfg.backend_url.clone(),
+                        lease_id: item.lease_id,
+                        lease_expires_at: item.lease_expires_at,
+                        job: item.job,
+                        progress_steps: self.cfg.progress_steps,
+                    };
 
-                        (job_summary, cmd, None)
-                    }
-                    WorkItem::Group(group) => {
-                        let group_id = group.group_id;
-                        let group_iters: Vec<u64> = group
-                            .jobs
-                            .iter()
-                            .map(|j| j.number_of_iterations)
-                            .collect();
-                        let total_iters = group_iters.iter().copied().max().unwrap_or(0);
-                        let Some(first) = group.jobs.first() else {
-                            continue;
-                        };
+                    (job_summary, cmd, None)
+                }
+                WorkItem::Group(group) => {
+                    let group_id = group.group_id;
+                    let group_iters: Vec<u64> =
+                        group.jobs.iter().map(|j| j.number_of_iterations).collect();
+                    let total_iters = group_iters.iter().copied().max().unwrap_or(0);
+                    let Some(first) = group.jobs.first() else {
+                        continue;
+                    };
 
-                        let job_summary = JobSummary {
-                            job_id: first.job_id,
-                            group_proofs: Some(group.jobs.len() as u32),
-                            height: first.height,
-                            field_vdf: first.field_vdf,
-                            number_of_iterations: total_iters,
-                        };
+                    let job_summary = JobSummary {
+                        job_id: first.job_id,
+                        group_proofs: Some(group.jobs.len() as u32),
+                        height: first.height,
+                        field_vdf: first.field_vdf,
+                        number_of_iterations: total_iters,
+                    };
 
-                        let cmd = WorkerCommand::Group {
-                            worker_idx: idx,
-                            backend_url: self.cfg.backend_url.clone(),
-                            lease_id: group.lease_id,
-                            lease_expires_at: group.lease_expires_at,
-                            group_id: group.group_id,
-                            jobs: group.jobs,
-                            progress_steps: self.cfg.progress_steps,
-                        };
+                    let cmd = WorkerCommand::Group {
+                        worker_idx: idx,
+                        backend_url: self.cfg.backend_url.clone(),
+                        lease_id: group.lease_id,
+                        lease_expires_at: group.lease_expires_at,
+                        group_id: group.group_id,
+                        jobs: group.jobs,
+                        progress_steps: self.cfg.progress_steps,
+                    };
 
-                        (job_summary, cmd, Some((group_id, group_iters)))
-                    }
-                };
+                    (job_summary, cmd, Some((group_id, group_iters)))
+                }
+            };
 
             {
                 let worker = &mut self.workers[idx];
@@ -442,7 +444,9 @@ impl EngineRuntime {
                         if changed {
                             if let Err(err) = store.persist().await {
                                 self.emit(EngineEvent::Warning {
-                                    message: format!("warning: failed to persist inflight leases: {err:#}"),
+                                    message: format!(
+                                        "warning: failed to persist inflight leases: {err:#}"
+                                    ),
                                 });
                             }
                         }
@@ -499,7 +503,10 @@ impl EngineRuntime {
                 self.emit(EngineEvent::WorkerStage { worker_idx, stage });
                 self.push_snapshot();
             }
-            WorkerInternalEvent::WorkFinished { worker_idx, outcomes } => {
+            WorkerInternalEvent::WorkFinished {
+                worker_idx,
+                outcomes,
+            } => {
                 if let Some(worker) = self.workers.get_mut(worker_idx) {
                     worker.finish_job();
                 }
@@ -530,7 +537,9 @@ impl EngineRuntime {
                         if changed {
                             if let Err(err) = store.persist().await {
                                 self.emit(EngineEvent::Warning {
-                                    message: format!("warning: failed to persist inflight leases: {err:#}"),
+                                    message: format!(
+                                        "warning: failed to persist inflight leases: {err:#}"
+                                    ),
                                 });
                             }
                         }
@@ -569,7 +578,11 @@ impl EngineRuntime {
                 worker.last_emitted_iters_done = iters_done;
                 (
                     iters_done,
-                    worker.work.as_ref().map(|p| p.squaring_total_iters()).unwrap_or(0),
+                    worker
+                        .work
+                        .as_ref()
+                        .map(|p| p.squaring_total_iters())
+                        .unwrap_or(0),
                     worker.speed_its_per_sec,
                 )
             };
@@ -742,9 +755,9 @@ async fn run_engine(
         Ok(http) => http,
         Err(err) => {
             let message = format!("build http client: {err:#}");
-            let _ = inner
-                .event_tx
-                .send(EngineEvent::Error { message: message.clone() });
+            let _ = inner.event_tx.send(EngineEvent::Error {
+                message: message.clone(),
+            });
             let _ = inner.event_tx.send(EngineEvent::Stopped);
             let _ = snapshot_tx.send(StatusSnapshot {
                 stop_requested: inner.should_stop(),
@@ -757,6 +770,26 @@ async fn run_engine(
 
     let submitter = Arc::new(tokio::sync::RwLock::new(cfg.submitter.clone()));
     let warned_invalid_reward_address = Arc::new(AtomicBool::new(false));
+
+    let pinning = Arc::new(PinningPlan::build(cfg.pin_mode));
+    match cfg.pin_mode {
+        PinMode::Off => {}
+        PinMode::L3 => {
+            if !cfg!(target_os = "linux") {
+                let _ = inner.event_tx.send(EngineEvent::Warning {
+                    message: "warning: --pin l3 is only supported on Linux; ignored.".to_string(),
+                });
+            } else if pinning.is_effective() {
+                let _ = inner.event_tx.send(EngineEvent::Warning {
+                    message: format!("CPU pinning enabled: l3 domains={}", pinning.domain_count()),
+                });
+            } else {
+                let _ = inner.event_tx.send(EngineEvent::Warning {
+                    message: "warning: --pin l3 requested, but no L3 shared-cpu domains were discovered; pinning disabled.".to_string(),
+                });
+            }
+        }
+    }
 
     let (internal_tx, internal_rx) = mpsc::unbounded_channel::<WorkerInternalEvent>();
 
@@ -776,6 +809,7 @@ async fn run_engine(
         let warned = warned_invalid_reward_address.clone();
         let internal_tx = internal_tx.clone();
         let progress = progress.clone();
+        let pinning = pinning.clone();
 
         worker_join.spawn(async move {
             crate::worker::run_worker_task(
@@ -786,6 +820,7 @@ async fn run_engine(
                 http,
                 submitter,
                 warned,
+                pinning,
             )
             .await;
         });
@@ -797,7 +832,8 @@ async fn run_engine(
         Ok(Some(store)) => Some(store),
         Ok(None) => None,
         Err(err) => {
-            let message = format!("warning: failed to load inflight leases (resume disabled): {err:#}");
+            let message =
+                format!("warning: failed to load inflight leases (resume disabled): {err:#}");
             let _ = inner.event_tx.send(EngineEvent::Warning { message });
             None
         }
@@ -843,9 +879,12 @@ async fn run_engine(
             }
         }
 
-        if cfg.use_groups && store.promote_jobs_to_groups_by_challenge(cfg.group_max_proofs_per_group) {
-            let message = "Migrated inflight proof leases into grouped work (resume will run groups)."
-                .to_string();
+        if cfg.use_groups
+            && store.promote_jobs_to_groups_by_challenge(cfg.group_max_proofs_per_group)
+        {
+            let message =
+                "Migrated inflight proof leases into grouped work (resume will run groups)."
+                    .to_string();
             let _ = inner.event_tx.send(EngineEvent::Warning { message });
             if let Err(err) = store.persist().await {
                 let message =

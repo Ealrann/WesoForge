@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/client",
+  "crates/client-affinity",
   "crates/client-core",
   "crates/client-engine",
   "crates/client-gui",
