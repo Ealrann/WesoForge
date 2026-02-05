@@ -42,7 +42,6 @@ impl Default for GuiState {
 struct StartOptions {
     parallel: Option<u32>,
     mode: Option<WorkMode>,
-    max_proofs_per_group: Option<u32>,
     mem_budget_bytes: Option<u64>,
 }
 
@@ -127,10 +126,6 @@ async fn start_client(
         }
     });
     let use_groups = matches!(mode, WorkMode::Group);
-    let group_max_proofs_per_group = opts
-        .max_proofs_per_group
-        .unwrap_or(EngineConfig::DEFAULT_GROUP_MAX_PROOFS_PER_GROUP)
-        .clamp(1, 200);
 
     let mem_budget_bytes = opts
         .mem_budget_bytes
@@ -141,7 +136,6 @@ async fn start_client(
         backend_url: default_backend_url(),
         parallel,
         use_groups,
-        group_max_proofs_per_group,
         mem_budget_bytes,
         submitter,
         idle_sleep: Duration::ZERO,

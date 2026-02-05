@@ -10,7 +10,6 @@
   type StartOptions = {
     parallel?: number | null;
     mode?: WorkMode | null;
-    max_proofs_per_group?: number | null;
     mem_budget_bytes?: number | null;
   };
   const appVersion = pkg.version;
@@ -78,7 +77,6 @@
 
 	  let parallel = $state<number>(4);
 	  let mode = $state<WorkMode>('proof');
-	  let maxProofsPerGroup = $state<number>(100);
 	  let memBudgetBytes = $state<string>(String(128 * 1024 * 1024));
 	  let running = $state(false);
 	  let stopRequested = $state(false);
@@ -440,18 +438,10 @@
     runError = null;
     try {
       commitParallel();
-      if (mode === 'group') {
-        if (!Number.isFinite(maxProofsPerGroup)) {
-          maxProofsPerGroup = 1;
-        } else {
-          maxProofsPerGroup = Math.min(200, Math.max(1, Math.floor(maxProofsPerGroup)));
-        }
-      }
       const mem = Number(memBudgetBytes);
       const opts: StartOptions = {
         parallel,
         mode,
-        max_proofs_per_group: mode === 'group' ? maxProofsPerGroup : null,
         mem_budget_bytes: Number.isFinite(mem) ? mem : 128 * 1024 * 1024
       };
       await invoke<void>('start_client', { opts });
@@ -640,20 +630,6 @@
                  <option value="group">Group</option>
                </select>
              </label>
- 
-             {#if mode === 'group'}
-               <label class="flex items-center justify-between gap-4 text-sm">
-                 <span class="text-muted">Max proofs / group</span>
-                 <input
-                   class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-                   type="number"
-                   min="1"
-                   max="200"
-                   step="1"
-                   bind:value={maxProofsPerGroup}
-                 />
-               </label>
-             {/if}
  		      </div>
 
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">

@@ -66,22 +66,17 @@ async fn main() -> anyhow::Result<()> {
         anyhow::bail!("--parallel must be >= 1");
     }
     let parallel = cli.parallel as usize;
-    if cli.mode == WorkMode::Group && cli.group_max_proofs_per_group == 0 {
-        anyhow::bail!("--group-max-proofs must be >= 1");
-    }
 
     let tui_enabled = !cli.no_tui && std::io::stdout().is_terminal();
     let warn_tui_too_many_workers = tui_enabled && parallel > 32;
     let progress_steps = if tui_enabled { PROGRESS_BAR_STEPS } else { 0 };
 
     let use_groups = cli.mode == WorkMode::Group;
-    let group_max_proofs_per_group = cli.group_max_proofs_per_group.clamp(1, 200);
 
     let engine = start_engine(EngineConfig {
         backend_url: cli.backend_url.clone(),
         parallel,
         use_groups,
-        group_max_proofs_per_group,
         mem_budget_bytes: cli.mem_budget_bytes,
         submitter,
         idle_sleep: Duration::ZERO,

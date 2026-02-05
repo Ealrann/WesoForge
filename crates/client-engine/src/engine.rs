@@ -13,7 +13,7 @@ use crate::api::{
     WorkerSnapshot, WorkerStage,
 };
 use crate::backend::{
-    BackendJobDto, BackendWorkBatch, BackendWorkGroup, fetch_group_work, fetch_work,
+    BackendJobDto, BackendWorkBatch, BackendWorkGroup, fetch_batch_work, fetch_work,
 };
 use crate::inflight::InflightStore;
 use crate::pinning::PinningPlan;
@@ -278,12 +278,10 @@ impl EngineRuntime {
         let use_groups = self.cfg.use_groups;
         // Only lease as many groups as needed to fill currently idle workers.
         let group_count = count.min(32) as u32;
-        let max_proofs_per_group = self.cfg.group_max_proofs_per_group;
         let count = count;
         self.fetch_task = Some(tokio::spawn(async move {
             if use_groups {
-                let groups =
-                    fetch_group_work(&http, &backend, group_count, max_proofs_per_group).await?;
+                let groups = fetch_batch_work(&http, &backend, group_count).await?;
                 return Ok(groups.into_iter().map(WorkItem::Group).collect());
             }
 
@@ -740,11 +738,6 @@ async fn run_engine(
     if cfg.recent_jobs_max == 0 {
         cfg.recent_jobs_max = EngineConfig::DEFAULT_RECENT_JOBS_MAX;
     }
-    if cfg.group_max_proofs_per_group == 0 {
-        cfg.group_max_proofs_per_group = EngineConfig::DEFAULT_GROUP_MAX_PROOFS_PER_GROUP;
-    }
-
-    cfg.group_max_proofs_per_group = cfg.group_max_proofs_per_group.clamp(1, 200);
 
     bbr_client_chiavdf_fast::set_bucket_memory_budget_bytes(cfg.mem_budget_bytes);
 
@@ -879,9 +872,7 @@ async fn run_engine(
             }
         }
 
-        if cfg.use_groups
-            && store.promote_jobs_to_groups_by_challenge(cfg.group_max_proofs_per_group)
-        {
+        if cfg.use_groups && store.promote_jobs_to_groups_by_challenge(4) {
             let message =
                 "Migrated inflight proof leases into grouped work (resume will run groups)."
                     .to_string();

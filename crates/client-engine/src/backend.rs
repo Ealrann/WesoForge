@@ -117,13 +117,8 @@ pub(crate) struct BackendWorkBatch {
 }
 
 #[derive(Debug, Serialize)]
-struct LeaseGroupsRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    group_id: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+struct LeaseBatchRequest {
     count: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_proofs_per_group: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,7 +130,6 @@ struct LeaseGroupsResponse {
 
 #[derive(Debug, Deserialize)]
 struct LeasedGroupDto {
-    group_id: u64,
     jobs: Vec<BackendJobDto>,
 }
 
@@ -191,22 +185,16 @@ pub(crate) async fn fetch_work(
     Ok(res.json().await?)
 }
 
-pub(crate) async fn fetch_group_work(
+pub(crate) async fn fetch_batch_work(
     http: &reqwest::Client,
     backend: &Url,
     count: u32,
-    max_proofs_per_group: u32,
 ) -> anyhow::Result<Vec<BackendWorkGroup>> {
-    let url = backend.join("api/jobs/lease_groups")?;
     let count = count.clamp(1, 32);
-    let max_proofs_per_group = max_proofs_per_group.clamp(1, 200);
+    let url = backend.join("api/jobs/lease_batch")?;
     let res = http
         .post(url)
-        .json(&LeaseGroupsRequest {
-            group_id: None,
-            count: Some(count),
-            max_proofs_per_group: Some(max_proofs_per_group),
-        })
+        .json(&LeaseBatchRequest { count: Some(count) })
         .send()
         .await?;
 
@@ -224,8 +212,9 @@ pub(crate) async fn fetch_group_work(
         if group.jobs.is_empty() {
             continue;
         }
+        let group_id = group.jobs[0].job_id;
         out.push(BackendWorkGroup {
-            group_id: group.group_id,
+            group_id,
             lease_id: batch.lease_id.clone(),
             lease_expires_at: batch.lease_expires_at,
             jobs: group.jobs,

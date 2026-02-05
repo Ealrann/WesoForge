@@ -26,16 +26,10 @@ pub struct EngineConfig {
 
     /// Whether to fetch grouped work and compute batch proofs (Trick 2).
     ///
-    /// When enabled, the engine leases work via `api/jobs/lease_groups` and uses
+    /// When enabled, the engine leases work via `api/jobs/lease_batch` and uses
     /// the chiavdf batch API to reuse squaring across multiple targets sharing
     /// the same discriminant.
     pub use_groups: bool,
-
-    /// Max number of proofs to request per leased group (Trick 2).
-    ///
-    /// When `use_groups` is enabled, the engine leases groups via `api/jobs/lease_groups`.
-    /// The backend clamps this value to a small upper bound.
-    pub group_max_proofs_per_group: u32,
 
     /// Memory budget (bytes) for the native streaming prover parameter tuner.
     ///
@@ -77,9 +71,6 @@ impl EngineConfig {
 
     /// Default size of the recent-jobs ring buffer.
     pub const DEFAULT_RECENT_JOBS_MAX: usize = 100;
-
-    /// Default max proofs per group when `use_groups` is enabled.
-    pub const DEFAULT_GROUP_MAX_PROOFS_PER_GROUP: u32 = 100;
 }
 
 /// A lightweight summary of a leased proof job.
