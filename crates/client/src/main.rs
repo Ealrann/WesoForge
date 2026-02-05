@@ -45,10 +45,10 @@ fn format_outcome_status(outcome: &bbr_client_engine::JobOutcome) -> String {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    if let Some(algo) = cli.bench {
+    if cli.bench {
         set_bucket_memory_budget_bytes(cli.mem_budget_bytes);
         set_enable_streaming_stats(true);
-        run_benchmark(algo)?;
+        run_benchmark()?;
         return Ok(());
     }
 

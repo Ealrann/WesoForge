@@ -124,7 +124,7 @@ pub struct Cli {
     )]
     pub mem_budget_bytes: u64,
 
-    /// Run a local benchmark (e.g. `--bench 0`) and exit.
-    #[arg(long, value_name = "ALGO")]
-    pub bench: Option<u32>,
+    /// Run a local benchmark (streaming getblock-opt path) and exit.
+    #[arg(long)]
+    pub bench: bool,
 }
