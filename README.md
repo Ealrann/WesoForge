@@ -7,7 +7,7 @@ WesoForge is a client for **bluebox compaction**. It leases compaction work from
 Under the hood it relies on a slightly modified `chiavdf` to improve parallelism for bluebox compaction:
 https://github.com/Ealrann/chiavdf
 
-## CLI options (Linux)
+## CLI options
 
 See `--help` for the full list. Common options:
 
@@ -15,10 +15,17 @@ See `--help` for the full list. Common options:
 - `--no-tui` (env `BBR_NO_TUI=1`) for plain logs (recommended for large `--parallel` values)
 - `-m, --mem <BUDGET>` (env `BBR_MEM_BUDGET`, default = `128MB`)
 
-## Linux runtime notes
+## Runtime notes
+
+### Linux
 
 - The CLI binary is dynamically linked (you may need GMP + C++ runtime depending on your distro).
 - The GUI uses the system WebView on Linux (WebKitGTK); depending on distro/version you may need to install the corresponding runtime packages.
+
+### macOS
+
+- The CLI binary is dynamically linked against GMP and the C++ runtime (installed via Homebrew or system libraries).
+- The GUI is distributed as a DMG containing the `.app` bundle.
 
 ## Build (from source)
 
@@ -70,6 +77,48 @@ Notes:
 - Requires `pnpm` (for the Svelte frontend).
 - Requires the Tauri CLI (`cargo tauri`) to be installed (e.g. `cargo install tauri-cli`).
 - Building the GUI needs the usual Tauri/Linux build deps (GTK/WebKitGTK development packages); package names vary per distro.
+
+### macOS (CLI, release)
+
+Builds the production client (default backend = `https://weso.forgeros.fr/`) and writes a versioned artifact under `dist/`.
+
+Dependencies (Homebrew):
+
+```bash
+brew install gmp boost llvm
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Build:
+
+```bash
+./build-cli.sh
+```
+
+### macOS (GUI DMG, release)
+
+Builds the DMG and writes a versioned artifact under `dist/`.
+
+Additional dependencies (Homebrew):
+
+```bash
+brew install node
+corepack enable pnpm
+cargo install tauri-cli
+```
+
+Build:
+
+```bash
+./build-gui.sh
+```
+
+Support build (release, but with devtools enabled):
+
+```bash
+SUPPORT_DEVTOOLS=1 ./build-gui.sh
+```
+
 
 ### Windows (CLI)
 
@@ -123,21 +172,26 @@ The artifact is written under `dist/WesoForge-gui_Windows_<version>_<arch>.zip`.
 
 ## Run
 
-### GUI
+### GUI (Linux)
 
 ```bash
 ./dist/WesoForge-gui_Linux_<version>_<arch>.AppImage
 ```
+
+### GUI (macOS)
+
+- Open `dist/WesoForge-gui_macOS_<version>_<arch>.dmg`
+- Drag `WesoForge.app` to Applications (or run directly from the DMG)
 
 ### GUI (Windows, portable)
 
 - Unzip `dist/WesoForge-gui_Windows_<version>_<arch>.zip`
 - Run `WesoForge\\WesoForge.exe`
 
-### CLI
+### CLI (Linux / macOS)
 
 ```bash
-./dist/WesoForge-cli_Linux_<version>_<arch>
+./dist/WesoForge-cli_<OS>_<version>_<arch>
 ```
 
 ## Development (local backend)
