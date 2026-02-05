@@ -709,17 +709,17 @@ pub(crate) async fn compute_witness(
             }
             let x = default_classgroup_element();
             let out = if progress_steps == 0 {
-                bbr_client_chiavdf_fast::prove_one_weso_fast_streaming(
+                bbr_client_chiavdf_fast::prove_one_weso_fast_streaming_getblock_opt(
                     &challenge,
                     &x,
                     &output,
                     DISCRIMINANT_BITS,
                     total_iters,
                 )
-                .context("chiavdf prove_one_weso_fast_streaming")?
+                .context("chiavdf prove_one_weso_fast_streaming_getblock_opt")?
             } else {
                 let progress_for_cb = progress_clone.clone();
-                bbr_client_chiavdf_fast::prove_one_weso_fast_streaming_with_progress(
+                bbr_client_chiavdf_fast::prove_one_weso_fast_streaming_getblock_opt_with_progress(
                     &challenge,
                     &x,
                     &output,
@@ -730,7 +730,7 @@ pub(crate) async fn compute_witness(
                         progress_for_cb.store(iters_done, Ordering::Relaxed);
                     },
                 )
-                .context("chiavdf prove_one_weso_fast_streaming_with_progress")?
+                .context("chiavdf prove_one_weso_fast_streaming_getblock_opt_with_progress")?
             };
 
             progress_clone.store(total_iters, Ordering::Relaxed);
