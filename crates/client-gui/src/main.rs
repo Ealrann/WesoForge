@@ -3,8 +3,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use reqwest::Url;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
@@ -12,7 +12,9 @@ use tokio::sync::Mutex;
 use tauri::Manager;
 
 use bbr_client_core::submitter::{SubmitterConfig, load_submitter_config, save_submitter_config};
-use bbr_client_engine::{EngineConfig, EngineEvent, EngineHandle, StatusSnapshot, start_engine};
+use bbr_client_engine::{
+    EngineConfig, EngineEvent, EngineHandle, PinMode, StatusSnapshot, start_engine,
+};
 
 struct GuiState {
     engine: Mutex<Option<EngineHandle>>,
@@ -86,7 +88,9 @@ async fn set_submitter_config(cfg: SubmitterConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn engine_progress(state: State<'_, Arc<GuiState>>) -> Result<Vec<WorkerProgressUpdate>, String> {
+async fn engine_progress(
+    state: State<'_, Arc<GuiState>>,
+) -> Result<Vec<WorkerProgressUpdate>, String> {
     let progress = state.progress.lock().await;
     Ok(progress.clone())
 }
@@ -144,6 +148,7 @@ async fn start_client(
         progress_steps: GUI_PROGRESS_STEPS,
         progress_tick: GUI_PROGRESS_TICK,
         recent_jobs_max: EngineConfig::DEFAULT_RECENT_JOBS_MAX,
+        pin_mode: PinMode::Off,
     });
 
     let mut events = engine.subscribe();
@@ -279,7 +284,9 @@ async fn client_running(state: State<'_, Arc<GuiState>>) -> Result<bool, String>
 }
 
 #[tauri::command]
-async fn engine_snapshot(state: State<'_, Arc<GuiState>>) -> Result<Option<StatusSnapshot>, String> {
+async fn engine_snapshot(
+    state: State<'_, Arc<GuiState>>,
+) -> Result<Option<StatusSnapshot>, String> {
     let guard = state.engine.lock().await;
     Ok(guard.as_ref().map(|engine| engine.snapshot()))
 }

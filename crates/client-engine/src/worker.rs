@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use chrono::Utc;
 use reqwest::Url;
 use tokio::sync::mpsc;
@@ -17,6 +17,7 @@ use bbr_client_core::submitter::SubmitterConfig;
 
 use crate::api::{JobOutcome, JobSummary, WorkerStage};
 use crate::backend::{BackendError, BackendJobDto, SubmitResponse, submit_job};
+use crate::pinning::PinningPlan;
 
 const DISCRIMINANT_BITS: usize = 1024;
 
@@ -54,10 +55,20 @@ pub(crate) enum WorkerCommand {
 }
 
 pub(crate) enum WorkerInternalEvent {
-    StageChanged { worker_idx: usize, stage: WorkerStage },
-    WorkFinished { worker_idx: usize, outcomes: Vec<JobOutcome> },
-    Warning { message: String },
-    Error { message: String },
+    StageChanged {
+        worker_idx: usize,
+        stage: WorkerStage,
+    },
+    WorkFinished {
+        worker_idx: usize,
+        outcomes: Vec<JobOutcome>,
+    },
+    Warning {
+        message: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 pub(crate) async fn run_worker_task(
@@ -68,7 +79,9 @@ pub(crate) async fn run_worker_task(
     http: reqwest::Client,
     submitter: Arc<tokio::sync::RwLock<SubmitterConfig>>,
     warned_invalid_reward_address: Arc<AtomicBool>,
+    pinning: Arc<PinningPlan>,
 ) {
+    let warned_pinning_failed = Arc::new(AtomicBool::new(false));
     while let Some(cmd) = rx.recv().await {
         match cmd {
             WorkerCommand::Stop => break,
@@ -87,6 +100,8 @@ pub(crate) async fn run_worker_task(
                     &http,
                     &submitter,
                     warned_invalid_reward_address.clone(),
+                    pinning.clone(),
+                    warned_pinning_failed.clone(),
                     backend_url,
                     lease_id,
                     lease_expires_at,
@@ -115,6 +130,8 @@ pub(crate) async fn run_worker_task(
                     &http,
                     &submitter,
                     warned_invalid_reward_address.clone(),
+                    pinning.clone(),
+                    warned_pinning_failed.clone(),
                     backend_url,
                     lease_id,
                     lease_expires_at,
@@ -139,6 +156,8 @@ async fn run_job(
     http: &reqwest::Client,
     submitter: &tokio::sync::RwLock<SubmitterConfig>,
     warned_invalid_reward_address: Arc<AtomicBool>,
+    pinning: Arc<PinningPlan>,
+    warned_pinning_failed: Arc<AtomicBool>,
     backend_url: Url,
     lease_id: String,
     lease_expires_at: i64,
@@ -200,6 +219,8 @@ async fn run_job(
         worker_idx,
         internal_tx,
         progress.clone(),
+        pinning.clone(),
+        warned_pinning_failed.clone(),
         job.number_of_iterations,
         progress_steps,
         challenge,
@@ -280,6 +301,8 @@ async fn run_group(
     http: &reqwest::Client,
     submitter: &tokio::sync::RwLock<SubmitterConfig>,
     warned_invalid_reward_address: Arc<AtomicBool>,
+    pinning: Arc<PinningPlan>,
+    warned_pinning_failed: Arc<AtomicBool>,
     backend_url: Url,
     lease_id: String,
     lease_expires_at: i64,
@@ -417,7 +440,11 @@ async fn run_group(
 
     let compute_started_at = Instant::now();
     let witnesses = match compute_witness_batch(
+        worker_idx,
+        internal_tx.clone(),
         progress.clone(),
+        pinning.clone(),
+        warned_pinning_failed.clone(),
         total_iters,
         lease_expires_at,
         progress_steps,
@@ -517,7 +544,11 @@ async fn run_group(
 }
 
 async fn compute_witness_batch(
+    worker_idx: usize,
+    internal_tx: mpsc::UnboundedSender<WorkerInternalEvent>,
     progress: Arc<AtomicU64>,
+    pinning: Arc<PinningPlan>,
+    warned_pinning_failed: Arc<AtomicBool>,
     total_iters: u64,
     lease_expires_at: i64,
     progress_steps: u64,
@@ -540,30 +571,46 @@ async fn compute_witness_batch(
         let outputs = outputs.clone();
         let iterations = iterations.clone();
         let progress_clone = progress.clone();
+        let pinning = pinning.clone();
+        let warned_pinning_failed = warned_pinning_failed.clone();
+        let internal_tx = internal_tx.clone();
 
-        let compute = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(Vec<u8>, bool)>> {
-            let x = default_classgroup_element();
+        let compute =
+            tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(Vec<u8>, bool)>> {
+                if let Err(err) = pinning.pin_current_thread_for_worker(worker_idx) {
+                    if !warned_pinning_failed.swap(true, Ordering::Relaxed) {
+                        let _ = internal_tx.send(WorkerInternalEvent::Warning {
+                            message: format!(
+                                "warning: failed to pin worker {} to L3 CPU set: {}",
+                                worker_idx + 1,
+                                err
+                            ),
+                        });
+                    }
+                }
+                let x = default_classgroup_element();
 
-            let batch_jobs: Vec<ChiavdfBatchJob<'_>> = outputs
-                .iter()
-                .zip(iterations.iter())
-                .map(|(y_ref, num_iterations)| ChiavdfBatchJob {
-                    y_ref_s: y_ref.as_slice(),
-                    num_iterations: *num_iterations,
-                })
-                .collect();
+                let batch_jobs: Vec<ChiavdfBatchJob<'_>> = outputs
+                    .iter()
+                    .zip(iterations.iter())
+                    .map(|(y_ref, num_iterations)| ChiavdfBatchJob {
+                        y_ref_s: y_ref.as_slice(),
+                        num_iterations: *num_iterations,
+                    })
+                    .collect();
 
-            let results = if progress_steps == 0 {
-                prove_one_weso_fast_streaming_getblock_opt_batch(
-                    &challenge,
-                    &x,
-                    DISCRIMINANT_BITS,
-                    &batch_jobs,
-                )
-                .context("chiavdf prove_one_weso_fast_streaming_getblock_opt_batch")?
-            } else {
-                let progress_for_cb = progress_clone.clone();
-                prove_one_weso_fast_streaming_getblock_opt_batch_with_progress(
+                let results =
+                    if progress_steps == 0 {
+                        prove_one_weso_fast_streaming_getblock_opt_batch(
+                            &challenge,
+                            &x,
+                            DISCRIMINANT_BITS,
+                            &batch_jobs,
+                        )
+                        .context("chiavdf prove_one_weso_fast_streaming_getblock_opt_batch")?
+                    } else {
+                        let progress_for_cb = progress_clone.clone();
+                        prove_one_weso_fast_streaming_getblock_opt_batch_with_progress(
                     &challenge,
                     &x,
                     DISCRIMINANT_BITS,
@@ -574,30 +621,30 @@ async fn compute_witness_batch(
                     },
                 )
                 .context("chiavdf prove_one_weso_fast_streaming_getblock_opt_batch_with_progress")?
-            };
+                    };
 
-            progress_clone.store(total_iters, Ordering::Relaxed);
+                progress_clone.store(total_iters, Ordering::Relaxed);
 
-            if results.len() != batch_jobs.len() {
-                anyhow::bail!(
-                    "unexpected batch result count (got {}, expected {})",
-                    results.len(),
-                    batch_jobs.len()
-                );
-            }
+                if results.len() != batch_jobs.len() {
+                    anyhow::bail!(
+                        "unexpected batch result count (got {}, expected {})",
+                        results.len(),
+                        batch_jobs.len()
+                    );
+                }
 
-            let mut out = Vec::with_capacity(batch_jobs.len());
-            for (idx, blob) in results.into_iter().enumerate() {
-                let half = blob.len() / 2;
-                let y = &blob[..half];
-                let witness = blob[half..].to_vec();
-                let output_mismatch = y != batch_jobs[idx].y_ref_s;
-                out.push((witness, output_mismatch));
-            }
+                let mut out = Vec::with_capacity(batch_jobs.len());
+                for (idx, blob) in results.into_iter().enumerate() {
+                    let half = blob.len() / 2;
+                    let y = &blob[..half];
+                    let witness = blob[half..].to_vec();
+                    let output_mismatch = y != batch_jobs[idx].y_ref_s;
+                    out.push((witness, output_mismatch));
+                }
 
-            Ok(out)
-        })
-        .await;
+                Ok(out)
+            })
+            .await;
 
         match compute {
             Ok(Ok(v)) => return Ok(v),
@@ -625,6 +672,8 @@ pub(crate) async fn compute_witness(
     worker_idx: usize,
     internal_tx: &mpsc::UnboundedSender<WorkerInternalEvent>,
     progress: Arc<AtomicU64>,
+    pinning: Arc<PinningPlan>,
+    warned_pinning_failed: Arc<AtomicBool>,
     total_iters: u64,
     progress_steps: u64,
     challenge: Vec<u8>,
@@ -642,8 +691,22 @@ pub(crate) async fn compute_witness(
         let challenge = challenge.clone();
         let output = output.clone();
         let progress_clone = progress.clone();
+        let pinning = pinning.clone();
+        let warned_pinning_failed = warned_pinning_failed.clone();
+        let internal_tx_for_pin = internal_tx.clone();
 
         let compute = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<u8>, bool)> {
+            if let Err(err) = pinning.pin_current_thread_for_worker(worker_idx) {
+                if !warned_pinning_failed.swap(true, Ordering::Relaxed) {
+                    let _ = internal_tx_for_pin.send(WorkerInternalEvent::Warning {
+                        message: format!(
+                            "warning: failed to pin worker {} to L3 CPU set: {}",
+                            worker_idx + 1,
+                            err
+                        ),
+                    });
+                }
+            }
             let x = default_classgroup_element();
             let out = if progress_steps == 0 {
                 bbr_client_chiavdf_fast::prove_one_weso_fast_streaming(
@@ -748,7 +811,9 @@ async fn submit_witness(
 ) -> Result<SubmitResponse, SubmitFailure> {
     let mut last_submit_err: Option<String> = None;
     let mut attempts: u32 = 0;
-    let mut last_log_at = Instant::now().checked_sub(Duration::from_secs(3600)).unwrap_or_else(Instant::now);
+    let mut last_log_at = Instant::now()
+        .checked_sub(Duration::from_secs(3600))
+        .unwrap_or_else(Instant::now);
 
     loop {
         let now = Utc::now().timestamp();

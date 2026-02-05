@@ -27,11 +27,7 @@ fn format_outcome_status(outcome: &bbr_client_engine::JobOutcome) -> String {
         return err.clone();
     }
 
-    let reason = outcome
-        .submit_reason
-        .as_deref()
-        .unwrap_or("unknown")
-        .trim();
+    let reason = outcome.submit_reason.as_deref().unwrap_or("unknown").trim();
     let mut status = humanize_submit_reason(reason);
 
     if outcome.output_mismatch {
@@ -92,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
         progress_steps,
         progress_tick: Duration::ZERO,
         recent_jobs_max: 0,
+        pin_mode: cli.pin.into(),
     });
 
     let mut events = engine.subscribe();
@@ -107,9 +104,17 @@ async fn main() -> anyhow::Result<()> {
         spawn_ctrl_c_handler(shutdown.clone(), shutdown_tx);
     }
 
-    let startup = format!("wesoforge {} parallel={}", env!("CARGO_PKG_VERSION"), parallel);
+    let startup = format!(
+        "wesoforge {} parallel={}",
+        env!("CARGO_PKG_VERSION"),
+        parallel
+    );
 
-    let mut ui = if tui_enabled { Some(Ui::new(parallel)) } else { None };
+    let mut ui = if tui_enabled {
+        Some(Ui::new(parallel))
+    } else {
+        None
+    };
     if let Some(ui) = &ui {
         ui.println(&startup);
     } else {
