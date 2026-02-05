@@ -10,14 +10,19 @@
   type StartOptions = {
     parallel?: number | null;
     mode?: WorkMode | null;
-    mem_budget_bytes?: number | null;
   };
   const appVersion = pkg.version;
   const PARALLEL_STORAGE_KEY = 'bbr_parallel_workers';
 
   type WorkerStage = 'Idle' | 'Computing' | 'Submitting';
 
-  type JobSummary = { job_id: number; height: number; field_vdf: number; number_of_iterations: number };
+  type JobSummary = {
+    job_id: number;
+    group_proofs?: number | null;
+    height: number;
+    field_vdf: number;
+    number_of_iterations: number;
+  };
 
   type WorkerSnapshot = {
     worker_idx: number;
@@ -77,7 +82,6 @@
 
 	  let parallel = $state<number>(4);
 	  let mode = $state<WorkMode>('proof');
-	  let memBudgetBytes = $state<string>(String(128 * 1024 * 1024));
 	  let running = $state(false);
 	  let stopRequested = $state(false);
 	  let runError = $state<string | null>(null);
@@ -438,11 +442,9 @@
     runError = null;
     try {
       commitParallel();
-      const mem = Number(memBudgetBytes);
       const opts: StartOptions = {
         parallel,
         mode,
-        mem_budget_bytes: Number.isFinite(mem) ? mem : 128 * 1024 * 1024
       };
       await invoke<void>('start_client', { opts });
       running = true;
@@ -605,22 +607,6 @@
  		        </label>
  
              <label class="flex items-center justify-between gap-4 text-sm">
-               <span class="text-muted">Memory budget</span>
-               <select
-                 class="w-36 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-                 bind:value={memBudgetBytes}
-               >
-                 <option value={String(128 * 1024 * 1024)}>128 MiB</option>
-                 <option value={String(256 * 1024 * 1024)}>256 MiB</option>
-                 <option value={String(512 * 1024 * 1024)}>512 MiB</option>
-                 <option value={String(1024 * 1024 * 1024)}>1 GiB</option>
-                 <option value={String(2 * 1024 * 1024 * 1024)}>2 GiB</option>
-                 <option value={String(4 * 1024 * 1024 * 1024)}>4 GiB</option>
-                 <option value={String(8 * 1024 * 1024 * 1024)}>8 GiB</option>
-               </select>
-             </label>
- 
-             <label class="flex items-center justify-between gap-4 text-sm">
                <span class="text-muted">Mode</span>
                <select
                  class="w-28 rounded border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
@@ -703,7 +689,11 @@
 
                 {#if w.job}
                   <div class="mt-2 text-xs text-muted">
-                    Job #{w.job.job_id} • height {w.job.height} • field {w.job.field_vdf}
+                    {#if w.job.group_proofs != null && w.job.group_proofs > 1}
+                      Group ({w.job.group_proofs} proofs)
+                    {:else}
+                      Job #{w.job.job_id} • height {w.job.height} • field {w.job.field_vdf}
+                    {/if}
                   </div>
 
                   <div class="mt-3">

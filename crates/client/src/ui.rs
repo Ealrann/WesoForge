@@ -78,7 +78,7 @@ impl Ui {
     }
 
     pub(crate) fn set_worker_job(&mut self, worker_idx: usize, job: &JobSummary) {
-        if let Some(count) = job.group_proofs {
+        if let Some(count) = job.group_proofs.filter(|count| *count > 1) {
             self.set_worker_work(
                 worker_idx,
                 format!("Group {count} proofs"),
