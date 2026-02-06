@@ -1,4 +1,5 @@
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -208,7 +209,7 @@ fn build_windows_fast_path(chiavdf_dir: &PathBuf, chiavdf_src: &PathBuf) {
     let mpir_dir = windows_mpir_dir(chiavdf_dir);
     let clang_cl = detect_clang_cl();
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-    let asm_objects = build_windows_asm_objects(&clang_cl, chiavdf_src, &out_dir);
+    let asm_objects = build_windows_asm_objects(&clang_cl, chiavdf_src, &mpir_dir, &out_dir);
 
     // Phase 4: link the fast-wrapper path with real assembly objects on Windows.
     let mut build_cpp = cc::Build::new();
@@ -247,8 +248,14 @@ fn build_windows_fast_path(chiavdf_dir: &PathBuf, chiavdf_src: &PathBuf) {
     println!("cargo:rustc-link-arg=/LARGEADDRESSAWARE:NO");
 }
 
-fn build_windows_asm_objects(clang_cl: &str, chiavdf_src: &Path, out_dir: &Path) -> Vec<PathBuf> {
+fn build_windows_asm_objects(
+    clang_cl: &str,
+    chiavdf_src: &Path,
+    mpir_dir: &Path,
+    out_dir: &Path,
+) -> Vec<PathBuf> {
     let asm_sources = ["asm_compiled.s", "avx2_asm_compiled.s", "avx512_asm_compiled.s"];
+    ensure_windows_asm_sources(clang_cl, chiavdf_src, mpir_dir, out_dir, &asm_sources);
     let mut objects = Vec::with_capacity(asm_sources.len());
 
     for asm_name in asm_sources {
@@ -289,6 +296,104 @@ fn build_windows_asm_objects(clang_cl: &str, chiavdf_src: &Path, out_dir: &Path)
     }
 
     objects
+}
+
+fn ensure_windows_asm_sources(
+    clang_cl: &str,
+    chiavdf_src: &Path,
+    mpir_dir: &Path,
+    out_dir: &Path,
+    asm_sources: &[&str],
+) {
+    let missing_sources: Vec<&str> = asm_sources
+        .iter()
+        .copied()
+        .filter(|name| !chiavdf_src.join(name).exists())
+        .collect();
+    if missing_sources.is_empty() {
+        return;
+    }
+
+    println!(
+        "cargo:warning=missing chiavdf asm sources ({}); regenerating via compile_asm.cpp",
+        missing_sources.join(", ")
+    );
+
+    let compile_asm_cpp = chiavdf_src.join("compile_asm.cpp");
+    let compile_asm_exe = out_dir.join("compile_asm_windows.exe");
+    let builtins_lib = detect_clang_rt_builtins(clang_cl).unwrap_or_else(|| {
+        panic!(
+            "failed to locate clang runtime builtins for {} (needed to link compile_asm.cpp)",
+            clang_cl
+        )
+    });
+
+    let status = Command::new(clang_cl)
+        .arg("/nologo")
+        .arg("/std:c++17")
+        .arg("/EHsc")
+        .arg("/O2")
+        .arg("/W0")
+        .arg("/clang:-Wno-deprecated-literal-operator")
+        .arg(format!("/I{}", chiavdf_src.display()))
+        .arg(format!("/I{}", mpir_dir.display()))
+        .arg(&compile_asm_cpp)
+        .arg(format!("/Fe{}", compile_asm_exe.display()))
+        .arg("/link")
+        .arg(format!("/LIBPATH:{}", mpir_dir.display()))
+        .arg("mpir.lib")
+        .arg(&builtins_lib)
+        .status()
+        .unwrap_or_else(|err| {
+            panic!(
+                "failed to invoke clang-cl for {}: {err}",
+                compile_asm_cpp.display()
+            )
+        });
+    if !status.success() {
+        panic!(
+            "failed to compile {} (exit code: {status})",
+            compile_asm_cpp.display()
+        );
+    }
+
+    let generate_targets: [&[&str]; 3] = [&[], &["avx2"], &["avx512"]];
+    for args in generate_targets {
+        let mut cmd = Command::new(&compile_asm_exe);
+        let existing_path = env::var_os("PATH").unwrap_or_default();
+        let mut runtime_path = OsString::from(mpir_dir.as_os_str());
+        runtime_path.push(";");
+        runtime_path.push(existing_path);
+        cmd.current_dir(chiavdf_src)
+            .env("PATH", runtime_path)
+            .args(args);
+        let status = cmd.status().unwrap_or_else(|err| {
+            panic!(
+                "failed to run {} with args {:?}: {err}",
+                compile_asm_exe.display(),
+                args
+            )
+        });
+        if !status.success() {
+            panic!(
+                "failed to generate asm sources via {} with args {:?} (exit code: {status})",
+                compile_asm_exe.display(),
+                args
+            );
+        }
+    }
+
+    let still_missing: Vec<&str> = asm_sources
+        .iter()
+        .copied()
+        .filter(|name| !chiavdf_src.join(name).exists())
+        .collect();
+    if !still_missing.is_empty() {
+        panic!(
+            "asm generation finished but required sources are still missing: {}",
+            still_missing.join(", ")
+        );
+    }
 }
 
 fn normalize_asm_for_windows(source: &str) -> String {
@@ -458,4 +563,44 @@ fn detect_clang_cl() -> String {
             "clang-cl".to_string()
         }
     })
+}
+
+fn detect_clang_rt_builtins(clang_cl: &str) -> Option<PathBuf> {
+    if let Ok(output) = Command::new(clang_cl).arg("--print-resource-dir").output() {
+        if output.status.success() {
+            let resource_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !resource_dir.is_empty() {
+                let candidate = PathBuf::from(resource_dir)
+                    .join("lib")
+                    .join("windows")
+                    .join("clang_rt.builtins-x86_64.lib");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    let clang_path = PathBuf::from(clang_cl);
+    let llvm_root = clang_path.parent().and_then(|bin| bin.parent())?;
+    let clang_lib_root = llvm_root.join("lib").join("clang");
+    let versions = fs::read_dir(&clang_lib_root).ok()?;
+    let mut version_dirs: Vec<PathBuf> = versions
+        .filter_map(|entry| entry.ok().map(|item| item.path()))
+        .filter(|path| path.is_dir())
+        .collect();
+    version_dirs.sort();
+    version_dirs.reverse();
+
+    for version_dir in version_dirs {
+        let candidate = version_dir
+            .join("lib")
+            .join("windows")
+            .join("clang_rt.builtins-x86_64.lib");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
 }
