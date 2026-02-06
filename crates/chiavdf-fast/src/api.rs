@@ -635,3 +635,223 @@ where
 
     take_result_batch(ptr, ffi_jobs.len())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::{
+        ChiavdfBatchJob, prove_one_weso_fast, prove_one_weso_fast_streaming,
+        prove_one_weso_fast_streaming_getblock_opt,
+        prove_one_weso_fast_streaming_getblock_opt_batch,
+        prove_one_weso_fast_streaming_getblock_opt_batch_with_progress,
+        prove_one_weso_fast_streaming_getblock_opt_with_progress,
+        prove_one_weso_fast_streaming_with_progress, prove_one_weso_fast_with_progress,
+    };
+
+    const TEST_DISCRIMINANT_BITS: usize = 1024;
+    const TEST_CHALLENGE: [u8; 32] = [
+        0x62, 0x62, 0x72, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x2d, 0x66, 0x66, 0x69, 0x2d,
+        0x74, 0x65, 0x73, 0x74, 0x2d, 0x76, 0x31, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09,
+    ];
+
+    fn default_classgroup_element() -> [u8; 100] {
+        let mut element = [0u8; 100];
+        element[0] = 0x08;
+        element
+    }
+
+    fn split_y_and_witness(result: &[u8]) -> (&[u8], &[u8]) {
+        let half = result.len() / 2;
+        (&result[..half], &result[half..])
+    }
+
+    #[test]
+    fn streaming_getblock_opt_matches_reference_y() {
+        let x_s = default_classgroup_element();
+        let num_iterations = 1_024;
+
+        let base = prove_one_weso_fast(
+            &TEST_CHALLENGE,
+            &x_s,
+            TEST_DISCRIMINANT_BITS,
+            num_iterations,
+        )
+        .expect("single proof should succeed");
+        let (y_ref, witness) = split_y_and_witness(&base);
+        assert!(!y_ref.is_empty());
+        assert!(!witness.is_empty());
+
+        let streaming = prove_one_weso_fast_streaming_getblock_opt(
+            &TEST_CHALLENGE,
+            &x_s,
+            y_ref,
+            TEST_DISCRIMINANT_BITS,
+            num_iterations,
+        )
+        .expect("streaming_getblock_opt proof should succeed");
+        let (stream_y, stream_witness) = split_y_and_witness(&streaming);
+        assert_eq!(stream_y, y_ref);
+        assert!(!stream_witness.is_empty());
+    }
+
+    #[test]
+    fn batch_getblock_opt_matches_reference_ys() {
+        let x_s = default_classgroup_element();
+        let iterations = [640_u64, 1_280_u64];
+
+        let single_results: Vec<Vec<u8>> = iterations
+            .into_iter()
+            .map(|num_iterations| {
+                prove_one_weso_fast(
+                    &TEST_CHALLENGE,
+                    &x_s,
+                    TEST_DISCRIMINANT_BITS,
+                    num_iterations,
+                )
+                .expect("single proof should succeed")
+            })
+            .collect();
+
+        let jobs: Vec<ChiavdfBatchJob<'_>> = single_results
+            .iter()
+            .zip(iterations.into_iter())
+            .map(|(single, num_iterations)| {
+                let (y_ref, _) = split_y_and_witness(single);
+                ChiavdfBatchJob {
+                    y_ref_s: y_ref,
+                    num_iterations,
+                }
+            })
+            .collect();
+
+        let batch = prove_one_weso_fast_streaming_getblock_opt_batch(
+            &TEST_CHALLENGE,
+            &x_s,
+            TEST_DISCRIMINANT_BITS,
+            &jobs,
+        )
+        .expect("batch streaming_getblock_opt proof should succeed");
+        assert_eq!(batch.len(), jobs.len());
+
+        for (out, job) in batch.iter().zip(jobs.iter()) {
+            let (y, witness) = split_y_and_witness(out);
+            assert_eq!(y, job.y_ref_s);
+            assert!(!witness.is_empty());
+        }
+    }
+
+    #[test]
+    fn progress_variants_and_streaming_modes_match_reference_y() {
+        let x_s = default_classgroup_element();
+        let num_iterations = 1_024_u64;
+
+        let base = prove_one_weso_fast(
+            &TEST_CHALLENGE,
+            &x_s,
+            TEST_DISCRIMINANT_BITS,
+            num_iterations,
+        )
+        .expect("single proof should succeed");
+        let (y_ref, witness) = split_y_and_witness(&base);
+        assert!(!y_ref.is_empty());
+        assert!(!witness.is_empty());
+
+        let single_progress_calls = Arc::new(AtomicU64::new(0));
+        let single_progress_last = Arc::new(AtomicU64::new(0));
+        let single_progress = prove_one_weso_fast_with_progress(
+            &TEST_CHALLENGE,
+            &x_s,
+            TEST_DISCRIMINANT_BITS,
+            num_iterations,
+            128,
+            {
+                let calls = Arc::clone(&single_progress_calls);
+                let last = Arc::clone(&single_progress_last);
+                move |iters_done| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    last.store(iters_done, Ordering::Relaxed);
+                }
+            },
+        )
+        .expect("single proof with progress should succeed");
+        let (single_y, single_witness) = split_y_and_witness(&single_progress);
+        assert_eq!(single_y, y_ref);
+        assert!(!single_witness.is_empty());
+        assert!(single_progress_calls.load(Ordering::Relaxed) > 0);
+        assert!(single_progress_last.load(Ordering::Relaxed) > 0);
+
+        let streaming = prove_one_weso_fast_streaming(
+            &TEST_CHALLENGE,
+            &x_s,
+            y_ref,
+            TEST_DISCRIMINANT_BITS,
+            num_iterations,
+        )
+        .expect("streaming proof should succeed");
+        assert_eq!(split_y_and_witness(&streaming).0, y_ref);
+
+        let streaming_progress_calls = Arc::new(AtomicU64::new(0));
+        let streaming_with_progress = prove_one_weso_fast_streaming_with_progress(
+            &TEST_CHALLENGE,
+            &x_s,
+            y_ref,
+            TEST_DISCRIMINANT_BITS,
+            num_iterations,
+            128,
+            {
+                let calls = Arc::clone(&streaming_progress_calls);
+                move |_iters_done| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                }
+            },
+        )
+        .expect("streaming proof with progress should succeed");
+        assert_eq!(split_y_and_witness(&streaming_with_progress).0, y_ref);
+        assert!(streaming_progress_calls.load(Ordering::Relaxed) > 0);
+
+        let getblock_progress_calls = Arc::new(AtomicU64::new(0));
+        let getblock_with_progress = prove_one_weso_fast_streaming_getblock_opt_with_progress(
+            &TEST_CHALLENGE,
+            &x_s,
+            y_ref,
+            TEST_DISCRIMINANT_BITS,
+            num_iterations,
+            128,
+            {
+                let calls = Arc::clone(&getblock_progress_calls);
+                move |_iters_done| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                }
+            },
+        )
+        .expect("streaming getblock-opt proof with progress should succeed");
+        assert_eq!(split_y_and_witness(&getblock_with_progress).0, y_ref);
+        assert!(getblock_progress_calls.load(Ordering::Relaxed) > 0);
+
+        let batch_jobs = [ChiavdfBatchJob {
+            y_ref_s: y_ref,
+            num_iterations,
+        }];
+        let batch_progress_calls = Arc::new(AtomicU64::new(0));
+        let batch_with_progress = prove_one_weso_fast_streaming_getblock_opt_batch_with_progress(
+            &TEST_CHALLENGE,
+            &x_s,
+            TEST_DISCRIMINANT_BITS,
+            &batch_jobs,
+            128,
+            {
+                let calls = Arc::clone(&batch_progress_calls);
+                move |_iters_done| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                }
+            },
+        )
+        .expect("batch streaming getblock-opt proof with progress should succeed");
+        assert_eq!(batch_with_progress.len(), 1);
+        assert_eq!(split_y_and_witness(&batch_with_progress[0]).0, y_ref);
+        assert!(batch_progress_calls.load(Ordering::Relaxed) > 0);
+    }
+}

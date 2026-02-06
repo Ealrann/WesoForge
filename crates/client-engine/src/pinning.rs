@@ -1,3 +1,4 @@
+#[cfg(target_os = "linux")]
 use std::collections::BTreeMap;
 
 use crate::api::PinMode;

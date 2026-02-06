@@ -1,9 +1,12 @@
 use std::env;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=BBR_CHIAVDF_DIR");
+    println!("cargo:rerun-if-env-changed=BBR_FORCE_WINDOWS_FALLBACK");
+    println!("cargo:rerun-if-env-changed=BBR_CLANG_CL");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir
@@ -71,7 +74,16 @@ or set BBR_CHIAVDF_DIR to a chiavdf checkout.",
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     if target_os == "windows" {
-        build_windows_fallback(&manifest_dir, &chiavdf_dir, &chiavdf_src);
+        let force_windows_fallback = env_flag("BBR_FORCE_WINDOWS_FALLBACK");
+
+        if force_windows_fallback {
+            println!(
+                "cargo:warning=BBR_FORCE_WINDOWS_FALLBACK=1 set; using Windows fallback implementation."
+            );
+            build_windows_fallback(&manifest_dir, &chiavdf_dir, &chiavdf_src);
+        } else {
+            build_windows_fast_path(&chiavdf_dir, &chiavdf_src);
+        }
         return;
     }
     // The full chiavdf fast engine uses x86 intrinsics and assembly; use the
@@ -151,6 +163,142 @@ fn build_windows_fallback(manifest_dir: &PathBuf, chiavdf_dir: &PathBuf, chiavdf
     let fallback_cpp = manifest_dir.join("native").join("chiavdf_fast_fallback.cpp");
     println!("cargo:rerun-if-changed={}", fallback_cpp.display());
 
+    let mpir_dir = windows_mpir_dir(chiavdf_dir);
+    let clang_cl = detect_clang_cl();
+
+    // The chiavdf sources use GNU/Clang builtins (e.g. __builtin_clzll) even
+    // on Windows. Compile this fallback with clang-cl for compatibility.
+    let mut build_cpp = cc::Build::new();
+    build_cpp.cpp(true);
+    build_cpp.compiler(&clang_cl);
+    build_cpp.flag("/std:c++17");
+    build_cpp.flag("/EHsc");
+    build_cpp.flag("/O2");
+    build_cpp.warnings(false);
+    build_cpp.define("_CRT_SECURE_NO_WARNINGS", None);
+    build_cpp.include(chiavdf_src);
+    build_cpp.include(&mpir_dir);
+    build_cpp.file(fallback_cpp);
+    build_cpp.compile("chiavdf_fastc");
+
+    // Keep lzcnt compiled as C so C linkage matches the chiavdf headers.
+    let mut build_c = cc::Build::new();
+    build_c.compiler(&clang_cl);
+    build_c.flag("/O2");
+    build_c.define("_CRT_SECURE_NO_WARNINGS", None);
+    build_c.include(chiavdf_src);
+    build_c.include(&mpir_dir);
+    build_c.file(chiavdf_src.join("refcode").join("lzcnt.c"));
+    build_c.compile("lzcnt");
+
+    // Link against MPIR (GMP-compatible) import library.
+    println!("cargo:rustc-link-search=native={}", mpir_dir.display());
+    println!("cargo:rustc-link-lib=mpir");
+    // The imported chiavdf assembly uses absolute 32-bit relocations.
+    // Keep Windows link settings compatible with that model for now.
+    println!("cargo:rustc-link-arg=/LARGEADDRESSAWARE:NO");
+}
+
+fn build_windows_fast_path(chiavdf_dir: &PathBuf, chiavdf_src: &PathBuf) {
+    let fast_wrapper_cpp = chiavdf_src.join("c_bindings").join("fast_wrapper.cpp");
+    let windows_compat_cpp = PathBuf::from("native").join("chiavdf_fast_windows_stubs.cpp");
+    println!("cargo:rerun-if-changed={}", fast_wrapper_cpp.display());
+    println!("cargo:rerun-if-changed={}", windows_compat_cpp.display());
+
+    let mpir_dir = windows_mpir_dir(chiavdf_dir);
+    let clang_cl = detect_clang_cl();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let asm_objects = build_windows_asm_objects(&clang_cl, chiavdf_src, &out_dir);
+
+    // Phase 4: link the fast-wrapper path with real assembly objects on Windows.
+    let mut build_cpp = cc::Build::new();
+    build_cpp.cpp(true);
+    build_cpp.compiler(&clang_cl);
+    build_cpp.flag("/std:c++17");
+    build_cpp.flag("/EHsc");
+    build_cpp.flag("/O2");
+    build_cpp.flag("/W0");
+    build_cpp.flag("/clang:-Wno-deprecated-literal-operator");
+    build_cpp.warnings(false);
+    build_cpp.define("_CRT_SECURE_NO_WARNINGS", None);
+    build_cpp.define("CHIAVDF_SKIP_BOOST_ASIO", Some("1"));
+    build_cpp.define("CHIAVDF_DISABLE_TEST_ASM", Some("1"));
+    build_cpp.include(chiavdf_src);
+    build_cpp.include(&mpir_dir);
+    build_cpp.file(fast_wrapper_cpp);
+    build_cpp.file(windows_compat_cpp);
+    for obj in asm_objects {
+        build_cpp.object(obj);
+    }
+    build_cpp.compile("chiavdf_fastc");
+
+    let mut build_c = cc::Build::new();
+    build_c.compiler(&clang_cl);
+    build_c.flag("/O2");
+    build_c.define("_CRT_SECURE_NO_WARNINGS", None);
+    build_c.include(chiavdf_src);
+    build_c.include(&mpir_dir);
+    build_c.file(chiavdf_src.join("refcode").join("lzcnt.c"));
+    build_c.compile("lzcnt");
+
+    println!("cargo:rustc-link-search=native={}", mpir_dir.display());
+    println!("cargo:rustc-link-lib=mpir");
+    // Needed when linking this crate's own test binaries on Windows fast path.
+    println!("cargo:rustc-link-arg=/LARGEADDRESSAWARE:NO");
+}
+
+fn build_windows_asm_objects(clang_cl: &str, chiavdf_src: &Path, out_dir: &Path) -> Vec<PathBuf> {
+    let asm_sources = ["asm_compiled.s", "avx2_asm_compiled.s", "avx512_asm_compiled.s"];
+    let mut objects = Vec::with_capacity(asm_sources.len());
+
+    for asm_name in asm_sources {
+        let source_path = chiavdf_src.join(asm_name);
+        println!("cargo:rerun-if-changed={}", source_path.display());
+        let source = fs::read_to_string(&source_path).unwrap_or_else(|err| {
+            panic!("failed to read {}: {err}", source_path.display());
+        });
+
+        let normalized = normalize_asm_for_windows(&source);
+        let normalized_path = out_dir.join(format!("{asm_name}.windows.s"));
+        fs::write(&normalized_path, normalized).unwrap_or_else(|err| {
+            panic!("failed to write normalized asm {}: {err}", normalized_path.display());
+        });
+
+        let object_path = out_dir.join(format!("{asm_name}.obj"));
+        let status = Command::new(clang_cl)
+            .arg("/nologo")
+            .arg("/c")
+            .arg(&normalized_path)
+            .arg(format!("/Fo{}", object_path.display()))
+            .status()
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to invoke clang-cl for {}: {err}",
+                    normalized_path.display()
+                )
+            });
+
+        if !status.success() {
+            panic!(
+                "failed to assemble {} with clang-cl (exit code: {status})",
+                source_path.display()
+            );
+        }
+
+        objects.push(object_path);
+    }
+
+    objects
+}
+
+fn normalize_asm_for_windows(source: &str) -> String {
+    source
+        .replace(".text 1", ".section .rdata,\"dr\"")
+        .replace("CMOVEQ", "CMOVE")
+        .replace("OFFSET FLAT:", "OFFSET ")
+}
+
+fn windows_mpir_dir(chiavdf_dir: &PathBuf) -> PathBuf {
     // The chiavdf repository expects the MPIR (GMP-compatible) Windows bundle to
     // live at `chiavdf/mpir_gc_x64`.
     let mpir_dir = chiavdf_dir.join("mpir_gc_x64");
@@ -161,37 +309,7 @@ fn build_windows_fallback(manifest_dir: &PathBuf, chiavdf_dir: &PathBuf, chiavdf
             mpir_lib.display()
         );
     }
-
-    // The chiavdf sources use GNU/Clang builtins (e.g. __builtin_clzll) even
-    // on Windows. Compile this fallback with clang-cl for compatibility.
-    //
-    // Prefer an explicit path if the user configured one; otherwise fall back
-    // to the default winget install location.
-    let clang_cl = env::var("BBR_CLANG_CL").unwrap_or_else(|_| {
-        let default = PathBuf::from(r"C:\Program Files\LLVM\bin\clang-cl.exe");
-        if default.exists() {
-            default.to_string_lossy().to_string()
-        } else {
-            "clang-cl".to_string()
-        }
-    });
-
-    let mut build = cc::Build::new();
-    build.cpp(true);
-    build.compiler(clang_cl);
-    build.flag("/std:c++17");
-    build.flag("/EHsc");
-    build.flag("/O2");
-    build.define("_CRT_SECURE_NO_WARNINGS", None);
-    build.include(chiavdf_src);
-    build.include(&mpir_dir);
-    build.file(fallback_cpp);
-    build.file(chiavdf_src.join("refcode").join("lzcnt.c"));
-    build.compile("chiavdf_fastc");
-
-    // Link against MPIR (GMP-compatible) import library.
-    println!("cargo:rustc-link-search=native={}", mpir_dir.display());
-    println!("cargo:rustc-link-lib=mpir");
+    mpir_dir
 }
 
 /// Build the portable "slow" fallback on macOS ARM (Apple Silicon). The full
@@ -319,4 +437,25 @@ fn detect_boost_include() -> Option<String> {
         }
     }
     None
+}
+
+fn env_flag(name: &str) -> bool {
+    match env::var(name) {
+        Ok(value) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
+        }
+        Err(_) => false,
+    }
+}
+
+fn detect_clang_cl() -> String {
+    env::var("BBR_CLANG_CL").unwrap_or_else(|_| {
+        let default = PathBuf::from(r"C:\Program Files\LLVM\bin\clang-cl.exe");
+        if default.exists() {
+            default.to_string_lossy().to_string()
+        } else {
+            "clang-cl".to_string()
+        }
+    })
 }
