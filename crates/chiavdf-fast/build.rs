@@ -7,6 +7,7 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-env-changed=BBR_CHIAVDF_DIR");
     println!("cargo:rerun-if-env-changed=BBR_FORCE_WINDOWS_FALLBACK");
+    println!("cargo:rerun-if-env-changed=BBR_FORCE_MACOS_ARM_FALLBACK");
     println!("cargo:rerun-if-env-changed=BBR_CLANG_CL");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
@@ -87,13 +88,14 @@ or set BBR_CHIAVDF_DIR to a chiavdf checkout.",
         }
         return;
     }
-    // The full chiavdf fast engine uses x86 intrinsics and assembly; use the
-    // portable "slow" fallback on macOS ARM (Apple Silicon) instead.
-    if target_os == "macos" && target_arch == "aarch64" {
+    if target_os == "macos" && target_arch == "aarch64" && env_flag("BBR_FORCE_MACOS_ARM_FALLBACK")
+    {
+        println!(
+            "cargo:warning=BBR_FORCE_MACOS_ARM_FALLBACK=1 set; using macOS ARM fallback implementation."
+        );
         build_macos_arm_fallback(&manifest_dir, &chiavdf_src);
         return;
     }
-
     // GMP (and gmpxx) may be in a non-default location (e.g. Homebrew on macOS).
     // Pass include path via CXXFLAGS so the compiler can find <gmpxx.h> and <gmp.h>.
     let (gmp_cflags, gmp_link_search) = detect_gmp_paths();
@@ -110,6 +112,14 @@ or set BBR_CHIAVDF_DIR to a chiavdf checkout.",
             cxxflags.push(' ');
         }
         cxxflags.push_str(existing);
+    }
+    if target_os == "macos" && target_arch == "aarch64" {
+        if !cxxflags.is_empty() {
+            cxxflags.push(' ');
+        }
+        // Apple Silicon fast path uses non-x86 code paths in `vdf.h`; skip Boost-only
+        // networking symbols and test-asm hooks for the embedded static library build.
+        cxxflags.push_str("-DCHIAVDF_SKIP_BOOST_ASIO=1 -DCHIAVDF_DISABLE_TEST_ASM=1");
     }
     if !cxxflags.is_empty() {
         make_env.push(("CXXFLAGS".to_string(), cxxflags));
