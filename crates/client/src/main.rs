@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     if cli.bench {
         set_bucket_memory_budget_bytes(cli.mem_budget_bytes);
         set_enable_streaming_stats(true);
-        run_benchmark()?;
+        run_benchmark(cli.mode, cli.parallel as usize)?;
         return Ok(());
     }
 

@@ -124,7 +124,9 @@ pub struct Cli {
     )]
     pub mem_budget_bytes: u64,
 
-    /// Run a local benchmark (streaming getblock-opt path) and exit.
+    /// Run a local benchmark and exit.
+    ///
+    /// Uses current `--mode` and `--parallel` settings.
     #[arg(long)]
     pub bench: bool,
 }
