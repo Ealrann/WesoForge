@@ -144,6 +144,11 @@ powershell -ExecutionPolicy Bypass -File .\\build-cli.ps1
 
 The artifact is written under `dist/` (and includes the required `mpir*.dll` runtime files).
 
+Operational note:
+- Windows uses the optimized fast path by default.
+- Set `BBR_FORCE_WINDOWS_FALLBACK=1` to force fallback mode.
+- See `docs/windows-fast-path.md` for architecture, troubleshooting, and recovery instructions.
+
 ### Windows (GUI, portable ZIP)
 
 Prereqs:

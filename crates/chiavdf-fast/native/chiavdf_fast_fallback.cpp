@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cfenv>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -24,6 +25,12 @@ typedef struct {
     uint8_t* data;
     size_t length;
 } ChiavdfByteArray;
+
+typedef struct {
+    const uint8_t* y_ref_s;
+    size_t y_ref_s_size;
+    uint64_t num_iterations;
+} ChiavdfBatchJob;
 
 typedef void (*ChiavdfProgressCallback)(uint64_t iters_done, void* user_data);
 
@@ -53,6 +60,39 @@ struct LastStreamingStats {
 thread_local LastStreamingStats last_streaming_stats;
 
 ChiavdfByteArray empty_result() { return ChiavdfByteArray{nullptr, 0}; }
+
+uint64_t saturating_add_u64(uint64_t lhs, uint64_t rhs) {
+    if (lhs > std::numeric_limits<uint64_t>::max() - rhs) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return lhs + rhs;
+}
+
+void free_byte_array_batch_internal(ChiavdfByteArray* arrays, size_t count) {
+    if (arrays == nullptr) {
+        return;
+    }
+    for (size_t idx = 0; idx < count; ++idx) {
+        delete[] arrays[idx].data;
+        arrays[idx].data = nullptr;
+        arrays[idx].length = 0;
+    }
+    delete[] arrays;
+}
+
+struct BatchProgressContext {
+    uint64_t completed_before = 0;
+    ChiavdfProgressCallback progress_cb = nullptr;
+    void* progress_user_data = nullptr;
+};
+
+void batch_progress_trampoline(uint64_t iters_done, void* user_data) {
+    auto* ctx = static_cast<BatchProgressContext*>(user_data);
+    if (ctx == nullptr || ctx->progress_cb == nullptr) {
+        return;
+    }
+    ctx->progress_cb(saturating_add_u64(ctx->completed_before, iters_done), ctx->progress_user_data);
+}
 
 void init_chiavdf_runtime() {
     init_gmp();
@@ -358,6 +398,99 @@ extern "C" ChiavdfByteArray chiavdf_prove_one_weso_fast_streaming_getblock_opt_w
         progress_interval,
         progress_cb,
         progress_user_data);
+}
+
+extern "C" ChiavdfByteArray* chiavdf_prove_one_weso_fast_streaming_getblock_opt_batch_with_progress(
+    const uint8_t* challenge_hash,
+    size_t challenge_size,
+    const uint8_t* x_s,
+    size_t x_s_size,
+    size_t discriminant_size_bits,
+    const ChiavdfBatchJob* jobs,
+    size_t job_count,
+    uint64_t progress_interval,
+    ChiavdfProgressCallback progress_cb,
+    void* progress_user_data) {
+    if (challenge_hash == nullptr || challenge_size == 0 || x_s == nullptr || x_s_size == 0) {
+        return nullptr;
+    }
+    if (discriminant_size_bits == 0 || jobs == nullptr || job_count == 0) {
+        return nullptr;
+    }
+
+    ChiavdfByteArray* out_arrays = nullptr;
+    try {
+        out_arrays = new ChiavdfByteArray[job_count];
+        for (size_t idx = 0; idx < job_count; ++idx) {
+            out_arrays[idx] = empty_result();
+        }
+
+        uint64_t completed_iters = 0;
+        for (size_t idx = 0; idx < job_count; ++idx) {
+            const ChiavdfBatchJob& job = jobs[idx];
+            if (job.y_ref_s == nullptr || job.y_ref_s_size == 0 || job.num_iterations == 0) {
+                free_byte_array_batch_internal(out_arrays, job_count);
+                return nullptr;
+            }
+
+            BatchProgressContext progress_ctx;
+            progress_ctx.completed_before = completed_iters;
+            progress_ctx.progress_cb = progress_cb;
+            progress_ctx.progress_user_data = progress_user_data;
+            const bool use_progress = progress_cb != nullptr && progress_interval != 0;
+
+            out_arrays[idx] = prove_one_weso_slow(
+                challenge_hash,
+                challenge_size,
+                x_s,
+                x_s_size,
+                job.y_ref_s,
+                job.y_ref_s_size,
+                /*check_y_ref=*/true,
+                discriminant_size_bits,
+                job.num_iterations,
+                progress_interval,
+                use_progress ? batch_progress_trampoline : nullptr,
+                use_progress ? static_cast<void*>(&progress_ctx) : nullptr);
+
+            if (out_arrays[idx].data == nullptr || out_arrays[idx].length == 0) {
+                free_byte_array_batch_internal(out_arrays, job_count);
+                return nullptr;
+            }
+
+            completed_iters = saturating_add_u64(completed_iters, job.num_iterations);
+        }
+
+        return out_arrays;
+    } catch (...) {
+        free_byte_array_batch_internal(out_arrays, job_count);
+        return nullptr;
+    }
+}
+
+extern "C" ChiavdfByteArray* chiavdf_prove_one_weso_fast_streaming_getblock_opt_batch(
+    const uint8_t* challenge_hash,
+    size_t challenge_size,
+    const uint8_t* x_s,
+    size_t x_s_size,
+    size_t discriminant_size_bits,
+    const ChiavdfBatchJob* jobs,
+    size_t job_count) {
+    return chiavdf_prove_one_weso_fast_streaming_getblock_opt_batch_with_progress(
+        challenge_hash,
+        challenge_size,
+        x_s,
+        x_s_size,
+        discriminant_size_bits,
+        jobs,
+        job_count,
+        /*progress_interval=*/0,
+        /*progress_cb=*/nullptr,
+        /*progress_user_data=*/nullptr);
+}
+
+extern "C" void chiavdf_free_byte_array_batch(ChiavdfByteArray* arrays, size_t count) {
+    free_byte_array_batch_internal(arrays, count);
 }
 
 extern "C" void chiavdf_free_byte_array(ChiavdfByteArray array) { delete[] array.data; }

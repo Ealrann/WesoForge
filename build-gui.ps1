@@ -133,6 +133,30 @@ public static class Win32 {
     }
 }
 
+function Ensure-UiDependencies {
+    $UiDir = Join-Path $Root "ui"
+    if (!(Test-Path -LiteralPath (Join-Path $UiDir "package.json"))) {
+        throw "GUI ui/package.json not found at: $UiDir"
+    }
+
+    if ($env:BBR_SKIP_PNPM_INSTALL -eq "1") {
+        return
+    }
+
+    if (!(Get-Command pnpm -ErrorAction SilentlyContinue)) {
+        throw "pnpm not found (needed to build the GUI frontend)."
+    }
+
+    $NodeModules = Join-Path $UiDir "node_modules"
+    if (!(Test-Path -LiteralPath $NodeModules)) {
+        Write-Host "Installing GUI frontend dependencies (ui/node_modules missing)..." -ForegroundColor Cyan
+        & pnpm -C $UiDir install
+        if ($LASTEXITCODE -ne 0) {
+            throw "pnpm install failed (exit code: $LASTEXITCODE)"
+        }
+    }
+}
+
 $DistDir = $env:DIST_DIR
 if ([string]::IsNullOrWhiteSpace($DistDir)) {
     $DistDir = Join-Path $Root "dist"
@@ -149,6 +173,7 @@ $AppDir = Join-Path $StageRoot $AppDirName
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 
 Ensure-IconIco
+Ensure-UiDependencies
 
 if ($env:BBR_SKIP_CARGO_BUILD -ne "1") {
     Write-Host "Building WesoForge GUI (Tauri, no bundle)..." -ForegroundColor Cyan

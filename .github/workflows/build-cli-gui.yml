@@ -12,13 +12,15 @@ on:
 
 jobs:
   build-and-test:
-    name: ${{ matrix.os }} (${{ matrix.arch }})
+    name: ${{ matrix.os }} (${{ matrix.arch }}, ${{ matrix.variant }})
     runs-on: ${{ matrix.runner }}
     env:
       # Linux: run AppImages without FUSE (extract and run) so downloaded linuxdeploy works in CI
       APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.os == 'Linux' && '1' || '' }}
       # So Package CLI step finds the binary built in the previous step
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      # Windows fallback escape hatch (set per matrix row).
+      BBR_FORCE_WINDOWS_FALLBACK: ${{ matrix.force_windows_fallback }}
     strategy:
       fail-fast: false
       matrix:
@@ -26,15 +28,28 @@ jobs:
           - os: Linux
             runner: ubuntu-latest
             arch: amd64
+            variant: standard
+            force_windows_fallback: ''
           - os: macOS
             runner: macos-latest
             arch: arm64
+            variant: standard
+            force_windows_fallback: ''
           - os: macOS
             runner: macos-15-intel
             arch: amd64
+            variant: standard
+            force_windows_fallback: ''
           - os: Windows
             runner: windows-latest
             arch: amd64
+            variant: fast-default
+            force_windows_fallback: ''
+          - os: Windows
+            runner: windows-latest
+            arch: amd64
+            variant: forced-fallback
+            force_windows_fallback: '1'
 
     steps:
       - name: Checkout
@@ -145,8 +160,8 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: |
-          ./build-cli.sh
-          ./build-gui.sh
+          bash ./build-cli.sh
+          bash ./build-gui.sh
 
       - name: Build CLI then GUI (Windows)
         if: matrix.os == 'Windows'
@@ -203,13 +218,13 @@ jobs:
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WesoForge-cli_${{ matrix.os }}_${{ env.WESOFORGE_VERSION }}_${{ matrix.arch }}
+          name: WesoForge-cli_${{ matrix.os }}_${{ env.WESOFORGE_VERSION }}_${{ matrix.arch }}_${{ matrix.variant }}
           path: dist-cli/
           if-no-files-found: warn
 
       - name: Upload GUI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WesoForge-gui_${{ matrix.os }}_${{ env.WESOFORGE_VERSION }}_${{ matrix.arch }}
+          name: WesoForge-gui_${{ matrix.os }}_${{ env.WESOFORGE_VERSION }}_${{ matrix.arch }}_${{ matrix.variant }}
           path: dist-gui/
           if-no-files-found: warn
