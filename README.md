@@ -22,6 +22,7 @@ https://github.com/Ealrann/chiavdf
 - [Build Linux](#build-linux)
 - [Build macOS](#build-macos)
 - [Build Windows](#build-windows)
+- [Container Image](#container-image)
 - [Run](#run)
 - [Development](#development)
 - [Advanced Docs](#advanced-docs)
@@ -32,9 +33,9 @@ Default work mode is `group`.
 
 ### Basic
 
-- `-p, --parallel <N>` (env: `BBR_PARALLEL_PROOFS`, default: logical CPU count, range: `1..=512`)
+- `-p, --parallel <N>` (env: `BBR_PARALLEL`, default: logical CPU count, range: `1..=512`)
 - `--mode <proof|group>` (env: `BBR_MODE`, default: `group`)
-- `--no-tui` (env: `BBR_NO_TUI=1`) for plain logs
+- `--no-tui` (env: `BBR_NO_TUI=true`) for plain logs
 - `-m, --mem <BUDGET>` (env: `BBR_MEM_BUDGET`, default: `128MB`)
 
 ### Advanced
@@ -79,6 +80,31 @@ cd ..
 powershell -ExecutionPolicy Bypass -File .\build-cli.ps1
 powershell -ExecutionPolicy Bypass -File .\build-gui.ps1
 ```
+
+## Container Image
+
+Build image from the repository root (`WesoForge/`):
+
+```bash
+docker build -t wesoforge:latest .
+```
+
+Run with env-based submitter config generation:
+
+```bash
+docker run --rm \
+  -e BBR_REWARD_ADDRESS="xch..." \
+  -e BBR_SUBMITTER_NAME="node-1" \
+  -e BBR_PARALLEL="32" \
+  -e BBR_PIN="l3" \
+  wesoforge:latest
+```
+
+Notes:
+
+- On startup, the entrypoint writes the submitter config file from env vars in the default app config directory.
+- Supported config env vars: `BBR_REWARD_ADDRESS`/`BBR_SUBMITTER_REWARD_ADDRESS` and `BBR_SUBMITTER_NAME`/`BBR_NAME`.
+- Alternatively set `BBR_SUBMITTER_CONFIG_JSON` to provide the full JSON config directly.
 
 ## Run
 

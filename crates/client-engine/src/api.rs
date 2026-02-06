@@ -21,7 +21,7 @@ pub struct EngineConfig {
     /// Backend base URL (e.g. `http://127.0.0.1:8080`).
     pub backend_url: Url,
 
-    /// Number of proof workers to run concurrently.
+    /// Number of workers to run concurrently.
     pub parallel: usize,
 
     /// Whether to fetch grouped work and compute batch proofs (Trick 2).

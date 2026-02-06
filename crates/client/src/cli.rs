@@ -13,7 +13,7 @@ fn default_backend_url() -> Url {
     Url::parse(DEFAULT_BACKEND_URL).expect("DEFAULT_BACKEND_URL must be a valid URL")
 }
 
-pub fn default_parallel_proofs() -> u16 {
+pub fn default_parallel_workers() -> u16 {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
@@ -91,12 +91,12 @@ pub struct Cli {
     #[arg(long, env = "BBR_BACKEND_URL", default_value_t = default_backend_url())]
     pub backend_url: Url,
 
-    /// Number of proof workers to run in parallel.
+    /// Number of workers to run in parallel.
     #[arg(
         short = 'p',
         long,
-        env = "BBR_PARALLEL_PROOFS",
-        default_value_t = default_parallel_proofs(),
+        env = "BBR_PARALLEL",
+        default_value_t = default_parallel_workers(),
         value_parser = clap::value_parser!(u16).range(1..=512)
     )]
     pub parallel: u16,
