@@ -2,204 +2,100 @@
 
 https://weso.forgeros.fr
 
-WesoForge is a client for **bluebox compaction**. It leases compaction work from the backend, computes compact VDF proof witnesses, and submits results back.
+WesoForge is a bluebox compaction client. It leases compaction work, computes compact VDF proofs, and submits results.
 
-Under the hood it relies on a slightly modified `chiavdf` to improve parallelism for bluebox compaction:
+Under the hood it uses a modified `chiavdf` focused on parallel compaction performance:
 https://github.com/Ealrann/chiavdf
 
-## CLI options
+## TL;DR Quick Start
 
-See `--help` for the full list. Common options:
+1. Run a prebuilt CLI binary
+   - Linux: `./dist/WesoForge-cli_Linux_<version>_<arch>`
+   - macOS: `./dist/WesoForge-cli_macOS_<version>_<arch>`
+   - Windows: `.\dist\WesoForge-cli_Windows_<version>_<arch>.exe`
+2. Build Linux CLI (release): `./build-cli.sh`
+3. Build Windows CLI (release): `powershell -ExecutionPolicy Bypass -File .\build-cli.ps1`
 
-- `-p, --parallel <N>` (env `BBR_PARALLEL_PROOFS`, default = logical CPU count, range = 1..512)
-- `--no-tui` (env `BBR_NO_TUI=1`) for plain logs (recommended for large `--parallel` values)
-- `-m, --mem <BUDGET>` (env `BBR_MEM_BUDGET`, default = `128MB`)
+## Table of Contents
 
-## Runtime notes
+- [CLI Options](#cli-options)
+- [Build Linux](#build-linux)
+- [Build macOS](#build-macos)
+- [Build Windows](#build-windows)
+- [Run](#run)
+- [Development](#development)
+- [Advanced Docs](#advanced-docs)
 
-### Linux
+## CLI Options
 
-- The CLI binary is dynamically linked (you may need GMP + C++ runtime depending on your distro).
-- The GUI uses the system WebView on Linux (WebKitGTK); depending on distro/version you may need to install the corresponding runtime packages.
+Default work mode is `group`.
 
-### macOS
+### Basic
 
-- The CLI binary is dynamically linked against GMP and the C++ runtime (installed via Homebrew or system libraries).
-- The GUI is distributed as a DMG containing the `.app` bundle.
+- `-p, --parallel <N>` (env: `BBR_PARALLEL_PROOFS`, default: logical CPU count, range: `1..=512`)
+- `--mode <proof|group>` (env: `BBR_MODE`, default: `group`)
+- `--no-tui` (env: `BBR_NO_TUI=1`) for plain logs
+- `-m, --mem <BUDGET>` (env: `BBR_MEM_BUDGET`, default: `128MB`)
 
-## Build (from source)
+### Advanced
 
-### Linux (CLI, release)
+- `--pin <off|l3>` (env: `BBR_PIN`, Linux-only affinity policy)
+- `--bench` (runs local benchmark with current `--mode` and `-p`)
+- `--backend-url <URL>` (env: `BBR_BACKEND_URL`)
 
-Builds the production client (default backend = `https://weso.forgeros.fr/`) and writes a versioned artifact under `dist/`.
+## Build Linux
 
-Dependencies (Debian/Ubuntu):
+Full instructions (CLI + GUI): `docs/build-linux.md`
 
-```bash
-sudo apt update
-sudo apt install -y git curl build-essential clang libgmp-dev libboost-all-dev gawk
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Build:
-
-```bash
-./build-cli.sh
-```
-
-### Linux (GUI AppImage, release)
-
-Builds the AppImage and writes a versioned artifact under `dist/`.
-
-Additional dependencies (Debian/Ubuntu):
-
-```bash
-curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-sudo apt install -y nodejs
-corepack enable pnpm
-cargo install tauri-cli
-sudo apt install -y pkg-config libgtk-3-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
-```
-
-Build:
-
-```bash
-./build-gui.sh
-```
-
-Support build (release, but with devtools enabled):
-
-```bash
-SUPPORT_DEVTOOLS=1 ./build-gui.sh
-```
-
-Notes:
-- Requires `pnpm` (for the Svelte frontend).
-- Requires the Tauri CLI (`cargo tauri`) to be installed (e.g. `cargo install tauri-cli`).
-- Building the GUI needs the usual Tauri/Linux build deps (GTK/WebKitGTK development packages); package names vary per distro.
-
-### macOS (CLI, release)
-
-Builds the production client (default backend = `https://weso.forgeros.fr/`) and writes a versioned artifact under `dist/`.
-
-Dependencies (Homebrew):
-
-```bash
-brew install gmp boost llvm
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Build:
+Quick commands:
 
 ```bash
 ./build-cli.sh
-```
-
-### macOS (GUI DMG, release)
-
-Builds the DMG and writes a versioned artifact under `dist/`.
-
-Additional dependencies (Homebrew):
-
-```bash
-brew install node
-corepack enable pnpm
-cargo install tauri-cli
-```
-
-Build:
-
-```bash
 ./build-gui.sh
 ```
 
-Support build (release, but with devtools enabled):
+## Build macOS
+
+Full instructions (CLI + GUI): `docs/build-macos.md`
+
+Quick commands:
 
 ```bash
-SUPPORT_DEVTOOLS=1 ./build-gui.sh
+./build-cli.sh
+./build-gui.sh
 ```
 
+## Build Windows
 
-### Windows (CLI)
+Full instructions (prereqs, one-time setup, CLI build, GUI build): `docs/build-windows.md`
 
-Prereqs:
-- Rust (via rustup)
-- Visual Studio 2022 (MSVC + Windows SDK)
-- LLVM (for `clang-cl`) *(or set `BBR_CLANG_CL` to your `clang-cl.exe` path)*
-
-Setup:
+Quick commands:
 
 ```powershell
 git submodule update --init --recursive
 cd chiavdf
 git clone https://github.com/Chia-Network/mpir_gc_x64.git
 cd ..
+powershell -ExecutionPolicy Bypass -File .\build-cli.ps1
+powershell -ExecutionPolicy Bypass -File .\build-gui.ps1
 ```
-
-Build (release):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\\build-cli.ps1
-```
-
-The artifact is written under `dist/` (and includes the required `mpir*.dll` runtime files).
-
-Operational note:
-- Windows uses the optimized fast path by default.
-- Set `BBR_FORCE_WINDOWS_FALLBACK=1` to force fallback mode.
-- See `docs/windows-fast-path.md` for architecture, troubleshooting, and recovery instructions.
-
-### Windows (GUI, portable ZIP)
-
-Prereqs:
-- Rust (via rustup)
-- Node.js `20.19+` (or `22.12+`) + `pnpm`
-- Visual Studio 2022 (MSVC + Windows SDK)
-- LLVM (for `clang-cl`) *(or set `BBR_CLANG_CL` to your `clang-cl.exe` path)*
-- Tauri CLI: `cargo install tauri-cli`
-
-Setup:
-
-```powershell
-git submodule update --init --recursive
-cd chiavdf
-git clone https://github.com/Chia-Network/mpir_gc_x64.git
-cd ..
-```
-
-Build + package (portable ZIP):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\\build-gui.ps1
-```
-
-The artifact is written under `dist/WesoForge-gui_Windows_<version>_<arch>.zip`.
 
 ## Run
 
-### GUI (Linux)
+- Linux CLI: `./dist/WesoForge-cli_Linux_<version>_<arch>`
+- macOS CLI: `./dist/WesoForge-cli_macOS_<version>_<arch>`
+- Linux GUI: `./dist/WesoForge-gui_Linux_<version>_<arch>.AppImage`
+- macOS GUI: open `dist/WesoForge-gui_macOS_<version>_<arch>.dmg`, then drag `WesoForge.app` to Applications
+- Windows GUI: unzip `dist/WesoForge-gui_Windows_<version>_<arch>.zip`, then run `WesoForge\WesoForge.exe`
 
-```bash
-./dist/WesoForge-gui_Linux_<version>_<arch>.AppImage
-```
+## Development
 
-### GUI (macOS)
+- CLI (local backend): `scripts/dev_cli.sh`
+- GUI (local backend): `scripts/dev_gui.sh`
 
-- Open `dist/WesoForge-gui_macOS_<version>_<arch>.dmg`
-- Drag `WesoForge.app` to Applications (or run directly from the DMG)
+## Advanced Docs
 
-### GUI (Windows, portable)
-
-- Unzip `dist/WesoForge-gui_Windows_<version>_<arch>.zip`
-- Run `WesoForge\\WesoForge.exe`
-
-### CLI (Linux / macOS)
-
-```bash
-./dist/WesoForge-cli_<OS>_<version>_<arch>
-```
-
-## Development (local backend)
-
-- CLI: `scripts/dev_cli.sh`
-- GUI: `scripts/dev_gui.sh`
+- Linux build details: `docs/build-linux.md`
+- macOS build details: `docs/build-macos.md`
+- Windows build details: `docs/build-windows.md`
+- Windows fast-path behavior and fallback: `docs/windows-fast-path.md`

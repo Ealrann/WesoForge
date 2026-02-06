@@ -68,9 +68,12 @@ fn default_backend_url() -> Url {
 }
 
 fn default_use_groups() -> bool {
-    std::env::var("BBR_MODE")
-        .ok()
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("group"))
+    match std::env::var("BBR_MODE") {
+        Ok(v) if v.trim().eq_ignore_ascii_case("proof") => false,
+        Ok(v) if v.trim().eq_ignore_ascii_case("group") => true,
+        Ok(_) => true,
+        Err(_) => true,
+    }
 }
 
 const GUI_PROGRESS_STEPS: u64 = 200;

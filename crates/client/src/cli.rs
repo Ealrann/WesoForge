@@ -62,9 +62,9 @@ fn parse_mem_budget_bytes(input: &str) -> Result<u64, String> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum WorkMode {
-    /// Fetch and compute individual proofs (default).
+    /// Fetch and compute individual proofs.
     Proof,
-    /// Fetch and compute grouped proofs (shared squaring).
+    /// Fetch and compute grouped proofs (shared squaring, default).
     Group,
 }
 
@@ -102,7 +102,7 @@ pub struct Cli {
     pub parallel: u16,
 
     /// Work mode: individual proofs or grouped proofs.
-    #[arg(long, env = "BBR_MODE", value_enum, default_value_t = WorkMode::Proof)]
+    #[arg(long, env = "BBR_MODE", value_enum, default_value_t = WorkMode::Group)]
     pub mode: WorkMode,
 
     #[arg(long, env = "BBR_NO_TUI", default_value_t = false)]

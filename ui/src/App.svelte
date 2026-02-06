@@ -81,7 +81,7 @@
   let logsOpen = $state(false);
 
 	  let parallel = $state<number>(4);
-	  let mode = $state<WorkMode>('proof');
+	  let mode = $state<WorkMode>('group');
 	  let running = $state(false);
 	  let stopRequested = $state(false);
 	  let runError = $state<string | null>(null);
