@@ -181,7 +181,7 @@ impl WorkerRuntime {
             let elapsed = now.duration_since(started_at);
             if elapsed.as_secs_f64() > 0.0 {
                 self.speed_its_per_sec =
-                    (effective_done as f64 / elapsed.as_secs_f64()).round() as u64;
+                    (iters_done as f64 / elapsed.as_secs_f64()).round() as u64;
             }
         }
         self.last_reported_squaring_iters_done = iters_done;
