@@ -92,6 +92,27 @@ jobs:
         if: matrix.runner == 'macos-15-intel'
         run: brew install boost
 
+      - name: macOS DMG preflight diagnostics
+        if: matrix.os == 'macOS'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          {
+            echo "=== macOS version ==="
+            sw_vers || true
+            echo
+            echo "=== Xcode path ==="
+            xcode-select -p || true
+            echo
+            echo "=== Tool lookup ==="
+            command -v hdiutil || true
+            command -v osascript || true
+            xcrun --find SetFile || true
+            xcrun --find Rez || true
+            xcrun --find DeRez || true
+          } | tee ci-logs/macos-preflight.log
+
       - name: Patch chiavdf for GMP 6.3 (macOS Intel)
         if: matrix.runner == 'macos-15-intel'
         run: git -C chiavdf apply "$GITHUB_WORKSPACE/patches/chiavdf-gmp63-mpz-macro.patch"
@@ -156,13 +177,25 @@ jobs:
           cargo install tauri-cli
           pnpm -C ui install
 
-      - name: Build CLI then GUI (Linux / macOS)
-        if: matrix.os != 'Windows'
+      - name: Build CLI then GUI (Linux)
+        if: matrix.os == 'Linux'
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: |
           bash ./build-cli.sh
           bash ./build-gui.sh
+
+      - name: Build CLI then GUI (macOS, debug logging)
+        if: matrix.os == 'macOS'
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+          RUST_LOG: tauri_bundler=debug,tauri_cli=debug
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          bash -x ./build-cli.sh 2>&1 | tee ci-logs/build-cli.log
+          bash -x ./build-gui.sh 2>&1 | tee ci-logs/build-gui.log
 
       - name: Build CLI then GUI (Windows)
         if: matrix.os == 'Windows'
@@ -172,6 +205,36 @@ jobs:
         run: |
           ./build-cli.ps1
           ./build-gui.ps1
+
+      - name: macOS DMG failure diagnostics
+        if: failure() && matrix.os == 'macOS'
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ci-logs
+          {
+            echo "=== target/release/bundle tree ==="
+            ls -la target/release/bundle || true
+            echo
+            echo "=== target/release/bundle/macos ==="
+            ls -la target/release/bundle/macos || true
+            echo
+            echo "=== target/release/bundle/dmg ==="
+            ls -la target/release/bundle/dmg || true
+            echo
+            echo "=== generated bundle_dmg.sh head ==="
+            sed -n '1,260p' target/release/bundle/dmg/bundle_dmg.sh || true
+          } | tee ci-logs/dmg-failure-diagnostics.log
+
+      - name: Upload macOS debug logs
+        if: always() && matrix.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-debug_${{ matrix.arch }}_${{ matrix.variant }}
+          path: |
+            ci-logs/
+            target/release/bundle/dmg/bundle_dmg.sh
+          if-no-files-found: warn
 
       - name: Test -h output (Linux / macOS)
         if: matrix.os != 'Windows'
