@@ -52,6 +52,7 @@ pub(crate) struct Ui {
     log_scroll_from_bottom: usize,
     log_viewport_height: usize,
     needs_redraw_clear: bool,
+    dirty: bool,
 }
 
 impl Ui {
@@ -83,6 +84,7 @@ impl Ui {
             log_scroll_from_bottom: 0,
             log_viewport_height: 1,
             needs_redraw_clear: true,
+            dirty: true,
         };
         ui.redraw();
         Ok(ui)
@@ -100,6 +102,7 @@ impl Ui {
         }
         self.logs.push_back(msg.to_string());
         self.clamp_log_scroll();
+        self.dirty = true;
         self.redraw();
     }
 
@@ -122,6 +125,7 @@ impl Ui {
             TuiInputEvent::LogEnd => self.log_scroll_from_bottom = 0,
         }
         self.clamp_log_scroll();
+        self.dirty = true;
         self.redraw();
     }
 
@@ -135,6 +139,7 @@ impl Ui {
         state.iters_per_sec = 0;
         state.last_reported_at = Instant::now();
         state.label = msg;
+        self.dirty = true;
         self.redraw();
     }
 
@@ -172,7 +177,7 @@ impl Ui {
         state.display_iters_done = state.display_iters_done.max(state.reported_iters_done);
         state.iters_per_sec = iters_per_sec;
         state.last_reported_at = Instant::now();
-        self.redraw();
+        self.dirty = true;
     }
 
     pub(crate) fn set_worker_idle(&mut self, worker_idx: usize) {
@@ -185,16 +190,19 @@ impl Ui {
         state.iters_per_sec = 0;
         state.last_reported_at = Instant::now();
         state.label = "Idle".to_string();
+        self.dirty = true;
         self.redraw();
     }
 
     pub(crate) fn set_stop_message(&mut self, msg: &str) {
         self.stop_message = msg.to_string();
+        self.dirty = true;
         self.redraw();
     }
 
     pub(crate) fn set_status_prefix(&mut self, msg: &str) {
         self.status_prefix = msg.to_string();
+        self.dirty = true;
         self.redraw();
     }
 
@@ -219,14 +227,19 @@ impl Ui {
                 .min(state.total_iters);
             state.display_iters_done = state.display_iters_done.max(predicted_iters);
         }
+        self.dirty = true;
         self.redraw();
     }
 
     pub(crate) fn freeze(&mut self) {
+        self.dirty = true;
         self.redraw();
     }
 
     fn redraw(&mut self) {
+        if !self.dirty && !self.needs_redraw_clear {
+            return;
+        }
         self.update_log_viewport_hint();
         self.clamp_log_scroll();
 
@@ -348,6 +361,9 @@ impl Ui {
         });
         if draw_result.is_ok() && needs_redraw_clear {
             self.needs_redraw_clear = false;
+        }
+        if draw_result.is_ok() {
+            self.dirty = false;
         }
     }
 

@@ -63,7 +63,7 @@ impl TuiTerminal {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = stop.clone();
         let thread = std::thread::spawn(move || {
-            use crossterm::event::{Event, KeyCode, KeyModifiers};
+            use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
             while !stop_thread.load(Ordering::Relaxed) {
                 if !crossterm::event::poll(Duration::from_millis(200)).unwrap_or(false) {
@@ -77,6 +77,9 @@ impl TuiTerminal {
                         let _ = input_tx.send(TuiInputEvent::TerminalResized);
                     }
                     Event::Key(key) => {
+                        if key.kind == KeyEventKind::Release {
+                            continue;
+                        }
                         if key.code == KeyCode::Char('c')
                             && key.modifiers.contains(KeyModifiers::CONTROL)
                         {
@@ -96,9 +99,15 @@ impl TuiTerminal {
                             KeyCode::PageDown => Some(TuiInputEvent::LogPageDown),
                             KeyCode::Home => Some(TuiInputEvent::LogHome),
                             KeyCode::End => Some(TuiInputEvent::LogEnd),
-                            KeyCode::Tab => Some(TuiInputEvent::ToggleTopMode),
+                            KeyCode::Tab if key.kind == KeyEventKind::Press => {
+                                Some(TuiInputEvent::ToggleTopMode)
+                            }
                             KeyCode::Char(ch) if ch.eq_ignore_ascii_case(&'h') => {
-                                Some(TuiInputEvent::ToggleLogPane)
+                                if key.kind == KeyEventKind::Press {
+                                    Some(TuiInputEvent::ToggleLogPane)
+                                } else {
+                                    None
+                                }
                             }
                             _ => None,
                         };

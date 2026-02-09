@@ -16,7 +16,7 @@ use bbr_client_engine::{EngineConfig, EngineEvent, start_engine};
 
 use crate::bench::run_benchmark;
 use crate::cli::{Cli, WorkMode};
-use crate::constants::PROGRESS_BAR_STEPS;
+use crate::constants::{PROGRESS_BAR_STEPS, TUI_REFRESH_INTERVAL_US};
 use crate::format::{format_job_done_line, humanize_submit_reason};
 use crate::shutdown::{ShutdownController, ShutdownEvent, spawn_ctrl_c_handler};
 use crate::terminal::{TuiInputEvent, TuiTerminal};
@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         submitter,
         idle_sleep: Duration::ZERO,
         progress_steps,
-        progress_tick: Duration::ZERO,
+        progress_tick: Duration::from_micros(TUI_REFRESH_INTERVAL_US),
         recent_jobs_max: 0,
         pin_mode: cli.pin.into(),
     });
@@ -137,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
     let mut worker_busy = vec![false; parallel];
     let mut worker_speed: Vec<u64> = vec![0; parallel];
 
-    let mut ticker = tokio::time::interval(Duration::from_millis(500));
+    let mut ticker = tokio::time::interval(Duration::from_micros(TUI_REFRESH_INTERVAL_US));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let mut immediate_exit = false;
