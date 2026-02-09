@@ -13,6 +13,7 @@ use crate::shutdown::{ShutdownController, ShutdownEvent};
 pub enum TuiInputEvent {
     ToggleTopMode,
     ToggleLogPane,
+    TerminalResized,
     LogUp,
     LogDown,
     LogPageUp,
@@ -71,35 +72,41 @@ impl TuiTerminal {
                 let Ok(ev) = crossterm::event::read() else {
                     continue;
                 };
-                if let Event::Key(key) = ev {
-                    if key.code == KeyCode::Char('c')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                    {
-                        let n = shutdown.bump_forced();
-                        if n == 1 {
-                            let _ = shutdown_tx.send(ShutdownEvent::Graceful);
-                        } else {
-                            let _ = shutdown_tx.send(ShutdownEvent::Immediate);
-                        }
-                        continue;
+                match ev {
+                    Event::Resize(_, _) => {
+                        let _ = input_tx.send(TuiInputEvent::TerminalResized);
                     }
+                    Event::Key(key) => {
+                        if key.code == KeyCode::Char('c')
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            let n = shutdown.bump_forced();
+                            if n == 1 {
+                                let _ = shutdown_tx.send(ShutdownEvent::Graceful);
+                            } else {
+                                let _ = shutdown_tx.send(ShutdownEvent::Immediate);
+                            }
+                            continue;
+                        }
 
-                    let mapped = match key.code {
-                        KeyCode::Up => Some(TuiInputEvent::LogUp),
-                        KeyCode::Down => Some(TuiInputEvent::LogDown),
-                        KeyCode::PageUp => Some(TuiInputEvent::LogPageUp),
-                        KeyCode::PageDown => Some(TuiInputEvent::LogPageDown),
-                        KeyCode::Home => Some(TuiInputEvent::LogHome),
-                        KeyCode::End => Some(TuiInputEvent::LogEnd),
-                        KeyCode::Tab => Some(TuiInputEvent::ToggleTopMode),
-                        KeyCode::Char(ch) if ch.eq_ignore_ascii_case(&'h') => {
-                            Some(TuiInputEvent::ToggleLogPane)
+                        let mapped = match key.code {
+                            KeyCode::Up => Some(TuiInputEvent::LogUp),
+                            KeyCode::Down => Some(TuiInputEvent::LogDown),
+                            KeyCode::PageUp => Some(TuiInputEvent::LogPageUp),
+                            KeyCode::PageDown => Some(TuiInputEvent::LogPageDown),
+                            KeyCode::Home => Some(TuiInputEvent::LogHome),
+                            KeyCode::End => Some(TuiInputEvent::LogEnd),
+                            KeyCode::Tab => Some(TuiInputEvent::ToggleTopMode),
+                            KeyCode::Char(ch) if ch.eq_ignore_ascii_case(&'h') => {
+                                Some(TuiInputEvent::ToggleLogPane)
+                            }
+                            _ => None,
+                        };
+                        if let Some(ev) = mapped {
+                            let _ = input_tx.send(ev);
                         }
-                        _ => None,
-                    };
-                    if let Some(ev) = mapped {
-                        let _ = input_tx.send(ev);
                     }
+                    _ => {}
                 }
             }
         });

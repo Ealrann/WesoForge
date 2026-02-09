@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="780" viewBox="0 0 1280 780" role="img" aria-labelledby="title desc">
+  <title id="title">WesoForge Group Computation (Compute Core Only)</title>
+  <desc id="desc">High-level diagram of grouped VDF computation without client backend concerns.</desc>
+
+  <defs>
+    <style>
+      .bg { fill: #0b1020; }
+      .panel { fill: #101a2d; stroke: #334155; stroke-width: 2; rx: 12; }
+      .box { fill: #1e293b; stroke: #475569; stroke-width: 2; rx: 10; }
+      .box2 { fill: #172554; stroke: #3b82f6; stroke-width: 2; rx: 10; }
+      .lane { fill: #0f1a33; stroke: #3a4b6b; stroke-width: 1.6; rx: 10; }
+      .title { fill: #e2e8f0; font: 700 30px Arial, sans-serif; }
+      .subtitle { fill: #cbd5e1; font: 500 18px Arial, sans-serif; }
+      .txt { fill: #e2e8f0; font: 600 16px Arial, sans-serif; }
+      .hint { fill: #9fb2cb; font: 500 14px Arial, sans-serif; }
+      .small { fill: #bfdbfe; font: 500 13px Arial, sans-serif; }
+      .arrow { stroke: #93c5fd; stroke-width: 2.5; fill: none; marker-end: url(#arr); }
+      .arrowSoft { stroke: #fca5a5; stroke-width: 2.3; fill: none; marker-end: url(#arr2); }
+      .chip { fill: #0c3a5a; stroke: #38bdf8; stroke-width: 1.5; rx: 8; }
+      .chipTxt { fill: #dbeafe; font: 600 13px Arial, sans-serif; }
+    </style>
+
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <polygon points="0,0 10,5 0,10" fill="#93c5fd" />
+    </marker>
+    <marker id="arr2" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <polygon points="0,0 10,5 0,10" fill="#fca5a5" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1280" height="780" />
+
+  <text class="title" x="46" y="52">Group Mode: computation pipeline (no backend/client layer)</text>
+  <text class="subtitle" x="46" y="80">Single shared squaring trajectory reused by many proof targets</text>
+
+  <rect class="panel" x="36" y="104" width="1208" height="640" />
+
+  <rect class="box" x="68" y="138" width="356" height="146" />
+  <text class="txt" x="90" y="172">Inputs already in memory</text>
+  <text class="hint" x="90" y="198">- one challenge + initial x</text>
+  <text class="hint" x="90" y="220">- jobs[ i ]: y_ref_i, wanted_iter_i</text>
+  <text class="hint" x="90" y="242">- total_iters = max(wanted_iter_i)</text>
+  <text class="hint" x="90" y="264">- each job has streaming bucket state</text>
+
+  <rect class="box2" x="462" y="138" width="748" height="382" />
+  <text class="txt" x="486" y="172">Shared squaring stream (t = 1 .. total_iters)</text>
+  <text class="hint" x="486" y="194">A single evolving classgroup state x(t) drives all grouped proofs.</text>
+
+  <rect class="lane" x="494" y="218" width="684" height="114" />
+  <text class="txt" x="516" y="248">Event scheduler</text>
+  <text class="hint" x="516" y="272">- for each job: next_event_t = min(next_checkpoint_t, wanted_iter)</text>
+  <text class="hint" x="516" y="294">- only jobs due at current t consume work</text>
+
+  <rect class="lane" x="494" y="348" width="684" height="150" />
+  <text class="txt" x="516" y="378">At iteration t (when event fires)</text>
+  <text class="hint" x="516" y="402">1) materialize checkpoint form x(t)</text>
+  <text class="hint" x="516" y="424">2) checkpoint event: update streaming buckets for due jobs</text>
+  <text class="hint" x="516" y="446">3) wanted_iter event: verify x(t) == y_ref_i</text>
+  <text class="hint" x="516" y="468">4) if matched, enqueue job i for proof finalization</text>
+
+  <rect class="chip" x="906" y="536" width="304" height="40" />
+  <text class="chipTxt" x="925" y="562">bounded finalizer workers (proof math)</text>
+
+  <rect class="box" x="68" y="332" width="356" height="132" />
+  <text class="txt" x="90" y="364">Per-job states evolve independently</text>
+  <text class="hint" x="90" y="390">- different wanted_iter_i per proof</text>
+  <text class="hint" x="90" y="412">- overlap is reused when events coincide</text>
+  <text class="hint" x="90" y="434">- no duplicated full squaring stream</text>
+
+  <rect class="box" x="68" y="504" width="356" height="132" />
+  <text class="txt" x="90" y="536">Output of compute core</text>
+  <text class="hint" x="90" y="562">- one witness per job</text>
+  <text class="hint" x="90" y="584">- optional y-check mismatch flag</text>
+  <text class="hint" x="90" y="606">- preserves job ordering</text>
+
+  <rect class="box" x="462" y="598" width="748" height="112" />
+  <text class="txt" x="486" y="630">Why it is faster than isolated proofs</text>
+  <text class="hint" x="486" y="654">The expensive squaring path is shared once; only proof-specific bucket/finalize work is per-job.</text>
+  <text class="hint" x="486" y="676">Benefit increases with larger groups and stronger iteration overlap.</text>
+
+  <path class="arrow" d="M424 210 L462 210" />
+  <path class="arrow" d="M424 396 L494 396" />
+  <path class="arrow" d="M836 332 L836 348" />
+  <path class="arrowSoft" d="M860 468 C900 505, 954 520, 1034 536" />
+  <path class="arrow" d="M906 576 C790 598, 560 560, 424 560" />
+
+  <text class="small" x="700" y="530">finalization runs off the main squaring timeline</text>
+</svg>

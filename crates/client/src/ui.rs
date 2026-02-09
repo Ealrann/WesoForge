@@ -6,7 +6,7 @@ use bbr_client_engine::JobSummary;
 use ratatui::Terminal;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Color, CrosstermBackend, Line, Modifier, Span, Style};
-use ratatui::widgets::{Cell, List, ListItem, Paragraph, Row, Table};
+use ratatui::widgets::{Cell, Clear, List, ListItem, Paragraph, Row, Table};
 
 use crate::format::{field_vdf_label, format_number};
 use crate::terminal::TuiInputEvent;
@@ -51,6 +51,7 @@ pub(crate) struct Ui {
     logs_visible: bool,
     log_scroll_from_bottom: usize,
     log_viewport_height: usize,
+    needs_redraw_clear: bool,
 }
 
 impl Ui {
@@ -81,6 +82,7 @@ impl Ui {
             logs_visible: true,
             log_scroll_from_bottom: 0,
             log_viewport_height: 1,
+            needs_redraw_clear: true,
         };
         ui.redraw();
         Ok(ui)
@@ -105,10 +107,13 @@ impl Ui {
         match event {
             TuiInputEvent::ToggleTopMode => {
                 self.top_mode = self.top_mode.toggle();
+                self.needs_redraw_clear = true;
             }
             TuiInputEvent::ToggleLogPane => {
                 self.logs_visible = !self.logs_visible;
+                self.needs_redraw_clear = true;
             }
+            TuiInputEvent::TerminalResized => self.needs_redraw_clear = true,
             TuiInputEvent::LogUp => self.scroll_logs_up(1),
             TuiInputEvent::LogDown => self.scroll_logs_down(1),
             TuiInputEvent::LogPageUp => self.scroll_logs_up(self.log_viewport_height.max(1)),
@@ -225,6 +230,7 @@ impl Ui {
         self.update_log_viewport_hint();
         self.clamp_log_scroll();
 
+        let needs_redraw_clear = self.needs_redraw_clear;
         let global_message = self.global_message.clone();
         let status_message = self.status_line();
         let top_mode = self.top_mode;
@@ -265,11 +271,17 @@ impl Ui {
             .collect();
         let visible_logs = self.visible_logs();
 
-        let _ = self.terminal.draw(|frame| {
+        let draw_result = self.terminal.draw(|frame| {
             let (global_area, top_area, separator_area, log_area, stop_area) =
                 compute_layout(frame.area(), logs_visible);
             let (top_content_area, top_footer_area) = split_pane_with_footer(top_area);
             let (log_content_area, log_footer_area) = split_pane_with_footer(log_area);
+            if needs_redraw_clear {
+                frame.render_widget(Clear, top_area);
+                frame.render_widget(Clear, separator_area);
+                frame.render_widget(Clear, log_area);
+                frame.render_widget(Clear, stop_area);
+            }
 
             let global = Paragraph::new(global_message.as_str())
                 .style(Style::default().add_modifier(Modifier::BOLD));
@@ -334,6 +346,9 @@ impl Ui {
             let status = Paragraph::new(status_message.as_str());
             frame.render_widget(status, stop_area);
         });
+        if draw_result.is_ok() && needs_redraw_clear {
+            self.needs_redraw_clear = false;
+        }
     }
 
     fn worker_line_detailed(&self, worker_idx: usize, state: &WorkerUiState) -> Line<'static> {
