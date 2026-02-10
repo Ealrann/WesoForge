@@ -88,6 +88,7 @@ struct WorkerRuntime {
     work: Option<WorkProgress>,
     compute_started_at: Option<Instant>,
     speed_its_per_sec: u64,
+    effective_speed_its_per_sec: u64,
     last_reported_squaring_iters_done: u64,
     last_reported_effective_iters_done: u64,
     last_emitted_iters_done: u64,
@@ -102,6 +103,7 @@ impl WorkerRuntime {
             work: None,
             compute_started_at: None,
             speed_its_per_sec: 0,
+            effective_speed_its_per_sec: 0,
             last_reported_squaring_iters_done: 0,
             last_reported_effective_iters_done: 0,
             last_emitted_iters_done: 0,
@@ -125,6 +127,7 @@ impl WorkerRuntime {
         });
         self.compute_started_at = Some(Instant::now());
         self.speed_its_per_sec = 0;
+        self.effective_speed_its_per_sec = 0;
         self.last_reported_squaring_iters_done = 0;
         self.last_reported_effective_iters_done = 0;
         self.last_emitted_iters_done = 0;
@@ -137,6 +140,7 @@ impl WorkerRuntime {
         self.work = Some(WorkProgress::Group { per_job_iters });
         self.compute_started_at = Some(Instant::now());
         self.speed_its_per_sec = 0;
+        self.effective_speed_its_per_sec = 0;
         self.last_reported_squaring_iters_done = 0;
         self.last_reported_effective_iters_done = 0;
         self.last_emitted_iters_done = 0;
@@ -153,6 +157,7 @@ impl WorkerRuntime {
         self.work = None;
         self.compute_started_at = None;
         self.speed_its_per_sec = 0;
+        self.effective_speed_its_per_sec = 0;
         self.last_reported_squaring_iters_done = 0;
         self.last_reported_effective_iters_done = 0;
         self.last_emitted_iters_done = 0;
@@ -182,6 +187,8 @@ impl WorkerRuntime {
             if elapsed.as_secs_f64() > 0.0 {
                 self.speed_its_per_sec =
                     (iters_done as f64 / elapsed.as_secs_f64()).round() as u64;
+                self.effective_speed_its_per_sec =
+                    (effective_done as f64 / elapsed.as_secs_f64()).round() as u64;
             }
         }
         self.last_reported_squaring_iters_done = iters_done;
@@ -565,7 +572,7 @@ impl EngineRuntime {
             };
             let iters_done = progress.load(std::sync::atomic::Ordering::Relaxed);
 
-            let (iters_done, iters_total, iters_per_sec) = {
+            let (iters_done, iters_total, iters_per_sec, effective_iters_per_sec) = {
                 let worker = &mut self.workers[idx];
                 let Some(iters_done) = worker.apply_progress(iters_done) else {
                     continue;
@@ -582,6 +589,7 @@ impl EngineRuntime {
                         .map(|p| p.squaring_total_iters())
                         .unwrap_or(0),
                     worker.speed_its_per_sec,
+                    worker.effective_speed_its_per_sec,
                 )
             };
 
@@ -590,6 +598,7 @@ impl EngineRuntime {
                 iters_done,
                 iters_total,
                 iters_per_sec,
+                effective_iters_per_sec,
             });
             snapshot_dirty = true;
         }

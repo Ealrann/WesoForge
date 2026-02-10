@@ -178,6 +178,7 @@ async fn start_client(
                     iters_done,
                     iters_total,
                     iters_per_sec,
+                    ..
                 } => {
                     let mut progress = state_for_task.progress.lock().await;
                     while progress.len() <= *worker_idx {

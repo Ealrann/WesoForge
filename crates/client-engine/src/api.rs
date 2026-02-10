@@ -113,7 +113,7 @@ pub struct WorkerSnapshot {
     pub iters_done: u64,
     /// Total iterations for the current job.
     pub iters_total: u64,
-    /// Estimated speed in iterations/second.
+    /// Estimated squaring speed in iterations/second.
     pub iters_per_sec: u64,
 }
 
@@ -169,8 +169,14 @@ pub enum EngineEvent {
         iters_done: u64,
         /// Iterations total.
         iters_total: u64,
-        /// Speed estimate in iterations/second.
+        /// Squaring speed estimate in iterations/second.
         iters_per_sec: u64,
+        /// Effective throughput estimate in iterations/second.
+        ///
+        /// In group mode, this counts the summed useful iteration progress across
+        /// all grouped proofs and is therefore typically higher than
+        /// `iters_per_sec`.
+        effective_iters_per_sec: u64,
     },
     /// Worker stage transition.
     WorkerStage {

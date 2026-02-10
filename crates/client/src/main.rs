@@ -135,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mut worker_busy = vec![false; parallel];
-    let mut worker_speed: Vec<u64> = vec![0; parallel];
+    let mut worker_effective_speed: Vec<u64> = vec![0; parallel];
 
     let mut ticker = tokio::time::interval(Duration::from_micros(TUI_REFRESH_INTERVAL_US));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -169,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
             _ = ticker.tick(), if tui_enabled => {
                 if let Some(ui) = &mut ui {
                     let busy = worker_busy.iter().filter(|v| **v).count();
-                    let speed: u64 = worker_speed.iter().sum();
+                    let speed: u64 = worker_effective_speed.iter().sum();
                     ui.tick_global(speed, busy, parallel);
                 }
             }
@@ -195,9 +195,9 @@ async fn main() -> anyhow::Result<()> {
                             ui.set_worker_job(worker_idx, &job);
                         }
                     }
-                    EngineEvent::WorkerProgress { worker_idx, iters_done, iters_per_sec, .. } => {
-                        if let Some(slot) = worker_speed.get_mut(worker_idx) {
-                            *slot = iters_per_sec;
+                    EngineEvent::WorkerProgress { worker_idx, iters_done, iters_per_sec, effective_iters_per_sec, .. } => {
+                        if let Some(slot) = worker_effective_speed.get_mut(worker_idx) {
+                            *slot = effective_iters_per_sec;
                         }
                         if let Some(ui) = &mut ui {
                             ui.set_worker_progress(worker_idx, iters_done, iters_per_sec);
@@ -209,7 +209,7 @@ async fn main() -> anyhow::Result<()> {
                         if let Some(slot) = worker_busy.get_mut(worker_idx) {
                             *slot = false;
                         }
-                        if let Some(slot) = worker_speed.get_mut(worker_idx) {
+                        if let Some(slot) = worker_effective_speed.get_mut(worker_idx) {
                             *slot = 0;
                         }
                         if let Some(ui) = &mut ui {
