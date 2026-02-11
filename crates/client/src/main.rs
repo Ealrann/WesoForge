@@ -200,7 +200,12 @@ async fn main() -> anyhow::Result<()> {
                             *slot = effective_iters_per_sec;
                         }
                         if let Some(ui) = &mut ui {
-                            ui.set_worker_progress(worker_idx, iters_done, iters_per_sec);
+                            ui.set_worker_progress(
+                                worker_idx,
+                                iters_done,
+                                iters_per_sec,
+                                effective_iters_per_sec,
+                            );
                         }
                     }
                     EngineEvent::WorkerStage { .. } => {}

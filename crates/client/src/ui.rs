@@ -34,7 +34,8 @@ struct WorkerUiState {
     total_iters: u64,
     reported_iters_done: u64,
     display_iters_done: u64,
-    iters_per_sec: u64,
+    squaring_iters_per_sec: u64,
+    effective_iters_per_sec: u64,
     last_reported_at: Instant,
     label: String,
 }
@@ -65,7 +66,8 @@ impl Ui {
                 total_iters: 0,
                 reported_iters_done: 0,
                 display_iters_done: 0,
-                iters_per_sec: 0,
+                squaring_iters_per_sec: 0,
+                effective_iters_per_sec: 0,
                 last_reported_at: Instant::now(),
                 label: "Idle".to_string(),
             });
@@ -136,7 +138,8 @@ impl Ui {
         state.total_iters = total_iters.max(1);
         state.reported_iters_done = 0;
         state.display_iters_done = 0;
-        state.iters_per_sec = 0;
+        state.squaring_iters_per_sec = 0;
+        state.effective_iters_per_sec = 0;
         state.last_reported_at = Instant::now();
         state.label = msg;
         self.dirty = true;
@@ -165,7 +168,8 @@ impl Ui {
         &mut self,
         worker_idx: usize,
         iters_done: u64,
-        iters_per_sec: u64,
+        squaring_iters_per_sec: u64,
+        effective_iters_per_sec: u64,
     ) {
         let Some(state) = self.worker_states.get_mut(worker_idx) else {
             return;
@@ -175,7 +179,8 @@ impl Ui {
         }
         state.reported_iters_done = iters_done.min(state.total_iters);
         state.display_iters_done = state.display_iters_done.max(state.reported_iters_done);
-        state.iters_per_sec = iters_per_sec;
+        state.squaring_iters_per_sec = squaring_iters_per_sec;
+        state.effective_iters_per_sec = effective_iters_per_sec;
         state.last_reported_at = Instant::now();
         self.dirty = true;
     }
@@ -187,7 +192,8 @@ impl Ui {
         state.total_iters = 0;
         state.reported_iters_done = 0;
         state.display_iters_done = 0;
-        state.iters_per_sec = 0;
+        state.squaring_iters_per_sec = 0;
+        state.effective_iters_per_sec = 0;
         state.last_reported_at = Instant::now();
         state.label = "Idle".to_string();
         self.dirty = true;
@@ -214,7 +220,7 @@ impl Ui {
 
         let now = Instant::now();
         for state in &mut self.worker_states {
-            if state.total_iters == 0 || state.iters_per_sec == 0 {
+            if state.total_iters == 0 || state.squaring_iters_per_sec == 0 {
                 continue;
             }
             let elapsed = now.saturating_duration_since(state.last_reported_at);
@@ -223,7 +229,9 @@ impl Ui {
             }
             let predicted_iters = state
                 .reported_iters_done
-                .saturating_add((elapsed.as_secs_f64() * state.iters_per_sec as f64) as u64)
+                .saturating_add(
+                    (elapsed.as_secs_f64() * state.squaring_iters_per_sec as f64) as u64,
+                )
                 .min(state.total_iters);
             state.display_iters_done = state.display_iters_done.max(predicted_iters);
         }
@@ -382,10 +390,10 @@ impl Ui {
         let percent = (iters_done.saturating_mul(100) / total_iters).min(100);
         let filled = (iters_done.saturating_mul(DETAILED_PROGRESS_BAR_WIDTH as u64) / total_iters)
             .min(DETAILED_PROGRESS_BAR_WIDTH as u64) as usize;
-        let eta = if state.iters_per_sec == 0 || iters_done >= total_iters {
+        let eta = if state.squaring_iters_per_sec == 0 || iters_done >= total_iters {
             "--:--:--".to_string()
         } else {
-            format_eta((total_iters - iters_done) / state.iters_per_sec)
+            format_eta((total_iters - iters_done) / state.squaring_iters_per_sec)
         };
 
         let before_bar = format!("{prefix}  {percent:>3}%[");
@@ -393,7 +401,7 @@ impl Ui {
         let bar_remaining = "-".repeat(DETAILED_PROGRESS_BAR_WIDTH.saturating_sub(filled));
         let after_bar = format!(
             "] {eta} ETA  {:>12} it/s  {:>11} it   {}",
-            format_number(state.iters_per_sec),
+            format_number(state.effective_iters_per_sec),
             format_number(iters_done),
             state.label
         );
@@ -423,10 +431,10 @@ impl Ui {
         } else {
             let total_iters = state.total_iters.max(1);
             let iters_done = state.display_iters_done.min(total_iters);
-            if state.iters_per_sec == 0 || iters_done >= total_iters {
+            if state.squaring_iters_per_sec == 0 || iters_done >= total_iters {
                 "--:--:--".to_string()
             } else {
-                format_eta((total_iters - iters_done) / state.iters_per_sec)
+                format_eta((total_iters - iters_done) / state.squaring_iters_per_sec)
             }
         };
         let right = format!("] {idle_or_eta}");
