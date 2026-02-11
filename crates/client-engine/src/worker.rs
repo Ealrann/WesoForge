@@ -340,6 +340,30 @@ async fn run_group(
             .collect();
     }
 
+    if jobs.len() == 1 {
+        let Some(job) = jobs.into_iter().next() else {
+            return Vec::new();
+        };
+        return vec![
+            run_job(
+                worker_idx,
+                internal_tx,
+                progress,
+                http,
+                submitter,
+                warned_invalid_reward_address,
+                pinning,
+                warned_pinning_failed,
+                backend_url,
+                lease_id,
+                lease_expires_at,
+                progress_steps,
+                job,
+            )
+            .await,
+        ];
+    }
+
     let challenge_b64 = jobs[0].challenge_b64.clone();
     let challenge = match B64.decode(challenge_b64.as_bytes()) {
         Ok(v) => v,
